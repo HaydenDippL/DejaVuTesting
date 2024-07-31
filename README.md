@@ -129,12 +129,22 @@ You may also notice the the strings that start with `'$'`. These are special opt
 
 ## params.json
 
+The params file defines path parameters and query parameters. Path paramters must always be prefaced with a `'@'` and be capitalized. If the path parameter key matches a segment of the url, its value array is used. Note that custom keywords can be defined for path variables also.
+
+Query paramters work much in the same way as the body.
+
 ```json
 {
-    "path": "",
-    "query": ""
+    "path": {
+        "@ID": [9083033499]
+    },
+    "query": {
+        "name": ["Hayden"]
+    }
 }
 ```
+
+If a legacy endpoint was defined as `"https://www.google.com/@ID"` the following json would reformat this as `"https://www.google.com/9083033499?name=Hayden"`
 
 ## headers.json
 
@@ -156,7 +166,8 @@ This is a **required** json file to specify the endpoints that you will be hitti
 ```json
 {
     "legacy": "https://www.google.legacy.com",
-    "migrated": "https://www.google.com"
+    "migrated": "https://www.google.com",
+    "method": "POST"
 }
 ```
 
