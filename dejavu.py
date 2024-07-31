@@ -4,6 +4,23 @@ import sys
 import json
 import requests
 
+class Discrepencies():
+    def __init__(self):
+        self.discrepencies = []
+
+    def __len__(self):
+        return len(self.discrepencies)
+
+    def add(self, attr, val, legacy_code, migrated_code):
+        self.discrepencies.append([attr, val, legacy_code, migrated_code])
+
+    def tablify(self):
+        output += "|Attributes|Input|Legacy|Migrated|\n"
+        output += "|:-:|:-:|:-:|:-:|"
+        for attr, val, legacy_code, migrated_code in self.discrepencies:
+            val = '"' + val + '"' if type(val) == str else val
+            output += f"|`{attr}`|`{val}`|{legacy_code}|{migrated_code}|\n\n"
+
 custom = {}
 params = {}
 body = {}
@@ -17,21 +34,29 @@ endpoints = {}
 call_api = None
 
 def get_keyword_code(keyword, in_legacy):
-    if type(custom.keyword) == list:
-        return custom.keyword[0] if in_legacy else custom.keyword[1]
+    if keyword in custom:
+        if type(custom.keyword) == list:
+            return custom.keyword[0] if in_legacy else custom.keyword[1]
+        else:
+            return custom.keyword
     else:
-        return custom.keyword
-    
+        return keyword
+
+def get_stable_elements(dict, in_legacy):
+    return {
+        key: value[0] if key not in custom else get_keyword_code(key, in_legacy) 
+        for key, value in dict.items()
+    }
+
+def get_stable_url(url, in_legacy):
+    for path_pattern, path_variable in get_stable_elements(params.path, in_legacy=in_legacy):
+        url = url.replace(path_pattern, path_variable)
+    return url
+
 def establish_baseline():
-    def get_stable_elements(dict, in_legacy):
-        return {
-            key: value[0] if key not in custom else get_keyword_code(key, in_legacy) 
-            for key, value in dict.items()
-        }
-    
     legacy_url = endpoints.legacy
     for path_match, path_variable in get_stable_elements(params.path, in_legacy=False).items():
-        legacy_url.replace(path_match, path_variable)
+        legacy_url = legacy_url.replace(path_match, path_variable)
 
     legacy_response = call_api(
         legacy_url, 
@@ -67,12 +92,143 @@ def establish_baseline():
                   Body: {get_stable_elements(body)}
             """)
         sys.exit()
-            
-def run_tests():
-    pass
 
-def generate_table():
-    pass
+def run_tests():
+    # Initialize stable variables
+    stable_legacy_url = get_stable_url(endpoints.legacy, in_legacy=True)
+    stable_migrated_url = get_stable_url(endpoints.migrated, in_legacy=False)
+    stable_legacy_params = get_stable_elements(params.query, in_legacy=True)
+    stable_migrated_params = get_stable_elements(params.query, in_legacy=False)
+    stable_legacy_body = get_stable_elements(body, in_legacy=True)
+    stable_migrated_body = get_stable_elements(body, in_legacy=False)
+
+    # Test URL and path variables
+    path_discrepencies = Discrepencies()
+
+    for path_pattern, path_variables in params.path.items():
+        for path_variable in path_variables[1:]:
+            temp_legacy_url = endpoints.legacy.replace(path_pattern, get_keyword_code(path_variable))
+            temp_legacy_url = get_stable_url(temp_legacy_url, in_legacy=True)
+
+            legacy_response = call_api(
+                temp_legacy_url,
+                headers=headers,
+                params=stable_legacy_params,
+                body=stable_legacy_body
+            )
+
+            temp_migrated_url = endpoints.migrated.replace(path_pattern, get_keyword_code(path_variable))
+            temp_migrated_url = get_stable_url(temp_migrated_url)
+
+            migrated_response = call_api(
+                temp_migrated_url,
+                headers=headers,
+                params=stable_migrated_params,
+                body=stable_migrated_body
+            )
+
+            if legacy_response.status_code != migrated_response.status_code:
+                path_discrepencies.add(path_pattern, path_variable, legacy_response.status_code, migrated_response.status_code)
+
+    # Test param queries
+    param_discrepencies = Discrepencies()
+
+    unstable_legacy_params = stable_legacy_params
+    unstable_migrated_params = stable_migrated_params
+    for attr, values in params.query.items():
+        for value in values[1:]:
+            unstable_legacy_params[attr] = get_keyword_code(value, in_legacy=True)
+
+            legacy_response = call_api(
+                stable_legacy_url,
+                headers=headers,
+                params=unstable_legacy_params,
+                body=stable_legacy_body
+            )
+
+            unstable_migrated_params[attr] = get_keyword_code(value, in_legacy=False)
+
+            migrated_response = call_api(
+                stable_migrated_url,
+                headers=headers,
+                params=unstable_migrated_params,
+                body=stable_migrated_body
+            )
+
+            if legacy_response.status_code != migrated_response.status_code:
+                param_discrepencies.add(attr, value, legacy_response.status_code, migrated_response.status_code)
+
+        unstable_legacy_params[attr] = get_keyword_code(values[0], in_legacy=True)
+        unstable_migrated_params[attr] = get_keyword_code(values[0], in_legacy=False)
+
+    # Test body
+    body_discrepencies = Discrepencies()
+
+    unstable_legacy_body = stable_legacy_body
+    unstable_migrated_body = stable_migrated_body
+    for attr, values in params.query.items():
+        for value in values[1:]:
+            unstable_legacy_body[attr] = get_keyword_code(value, in_legacy=True)
+
+            legacy_response = call_api(
+                stable_legacy_url,
+                headers=headers,
+                params=stable_legacy_params,
+                body=unstable_legacy_body
+            )
+            
+            unstable_migrated_body[attr] = get_keyword_code(value, in_legacy=False)
+
+            migrated_response = call_api(
+                stable_migrated_url,
+                headers=headers,
+                params=stable_migrated_params,
+                body=unstable_migrated_body
+            )
+
+            if legacy_response.status_code != migrated_response.status_code:
+                body_discrepencies.add(attr, value, legacy_response.status_code, migrated_response.status_code)
+
+        unstable_legacy_body[attr] = get_keyword_code(values[0], in_legacy=True)
+        unstable_migrated_body[attr] = get_keyword_code(values[0], in_legacy=False)
+    
+    return (path_discrepencies, param_discrepencies, body_discrepencies)
+
+def generate_tables(path_discrepencies, param_discrepencies, body_discrepencies):
+    output = ""
+
+    total_path_options = 0
+    for options in params.path.values():
+        total_path_options += len(options)
+    if len(path_discrepencies) > 0:
+        output += path_discrepencies.tablify()
+    elif len(params.path.items()) == total_path_options:
+        output += "No testing done for **path**...\n\n"
+    else:
+        output += "No discrepencies found in the **path testing**...\n\n"
+
+    total_param_options = 0
+    for options in params.query.values():
+        total_param_options += len(options)
+    if len(param_discrepencies) > 0:
+        output += param_discrepencies.tablify()
+    elif len(params.query) == total_param_options:
+        output += "No testing done for **params**...\n\n"
+    else:
+        output += "No discrepencies found in the **params testing**...\n\n"
+
+    total_body_options = 0
+    for options in body.values():
+        total_body_options += len(options)
+    if len(body_discrepencies) > 0:
+        output += body_discrepencies
+    elif len(body.items()) == total_body_options:
+        output += "No testing done for **body**...\n\n"
+    else:
+        output += "No discrepencies found in the *body testing**...\n\n"
+
+    return output
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process some JSON files.")
@@ -182,3 +338,11 @@ if __name__ == "__main__":
             elif method == "HEAD": call_api = requests.head
     else:
         path_does_not_exist(args.endpoints)
+    
+    establish_baseline()
+
+    path_discrepencies, param_discrepencies, body_discrepencies = run_tests()
+
+    output = generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
+
+    print(output)
