@@ -35,7 +35,7 @@ endpoints = {}
 call_api = None
 
 def get_keyword_code(keyword, in_legacy):
-    if keyword in custom:
+    if type(keyword) == str and keyword in custom:
         if type(custom.keyword) == list:
             return custom.keyword[0] if in_legacy else custom.keyword[1]
         else:
@@ -50,31 +50,35 @@ def get_stable_elements(dict, in_legacy):
     }
 
 def get_stable_url(url, in_legacy):
-    for path_pattern, path_variable in get_stable_elements(params.path, in_legacy=in_legacy):
-        url = url.replace(path_pattern, path_variable)
+    for path_pattern, path_variable in get_stable_elements(params['path'], in_legacy=in_legacy).items():
+        url = url.replace(path_pattern, str(path_variable))
     return url
 
 def establish_baseline():
-    legacy_url = endpoints.legacy
-    for path_match, path_variable in get_stable_elements(params.path, in_legacy=False).items():
-        legacy_url = legacy_url.replace(path_match, path_variable)
+    legacy_url = endpoints['legacy']
+    for path_match, path_variable in get_stable_elements(params['path'], in_legacy=False).items():
+        legacy_url = legacy_url.replace(path_match, str(path_variable))
+    legacy_stable_query = get_stable_elements(params['query'], in_legacy=True)
+    legacy_stable_body = get_stable_elements(body, in_legacy=True)
 
     legacy_response = call_api(
         legacy_url, 
         headers=headers,
-        params=get_stable_elements(params.query, in_legacy=True),
-        body=get_stable_elements(body, in_legacy=True),
+        params=legacy_stable_query,
+        json=legacy_stable_body,
     )
 
-    migrated_url = endpoints.migrated
-    for path_match, path_variable in get_stable_elements(params.path, in_legacy=False).items():
-        migrated_url = migrated_url.replace(path_match, path_variable)
+    migrated_url = endpoints['migrated']
+    for path_match, path_variable in get_stable_elements(params['path'], in_legacy=False).items():
+        migrated_url = migrated_url.replace(path_match, str(path_variable))
+    migrated_stable_query = get_stable_elements(params['query'], in_legacy=False)
+    migrated_stable_body = get_stable_elements(body, in_legacy=False)
     
     migrated_response = call_api(
         migrated_url,
         headers=headers,
-        params=get_stable_elements(params.query, in_legacy=False),
-        body=get_stable_elements(body, in_legacy=False)   
+        params=migrated_stable_query,
+        json=migrated_stable_body   
     )
 
     if legacy_response.status_code != 200 or migrated_response.status_code != 200:
@@ -82,14 +86,14 @@ def establish_baseline():
             print(f"""Legacy responded to the stable call with a {legacy_response.status_code} when a 200 is required...
                   Url: {legacy_url}
                   Headers: {headers}
-                  Params: {get_stable_elements(params.query)}
+                  Params: {get_stable_elements(params['query'])}
                   Body: {get_stable_elements(body)}
             """)
         if migrated_response.status_code != 200:
             print(f"""Migrated responded to the stable call with a {migrated_response.status_code} when a 200 is required...
                   Url: {migrated_url}
                   Headers: {headers}
-                  Params: {get_stable_elements(params.query)}
+                  Params: {get_stable_elements(params['query'])}
                   Body: {get_stable_elements(body)}
             """)
         sys.exit()
@@ -99,14 +103,14 @@ def run_test(legacy_url, migrated_url, headers, legacy_params, migrated_params, 
         legacy_url,
         headers=headers,
         params=legacy_params,
-        body=legacy_body
+        json=legacy_body
     )
 
     migrated_response = call_api(
         migrated_url,
         headers=headers,
         params=migrated_params,
-        body=migrated_body
+        json=migrated_body
     )
 
     if legacy_response.status_code != migrated_response.status_code:
@@ -120,17 +124,17 @@ def run_test(legacy_url, migrated_url, headers, legacy_params, migrated_params, 
 
 def run_tests():
     # Initialize stable variables
-    stable_legacy_url = get_stable_url(endpoints.legacy, in_legacy=True)
-    stable_migrated_url = get_stable_url(endpoints.migrated, in_legacy=False)
-    stable_legacy_params = get_stable_elements(params.query, in_legacy=True)
-    stable_migrated_params = get_stable_elements(params.query, in_legacy=False)
+    stable_legacy_url = get_stable_url(endpoints['legacy'], in_legacy=True)
+    stable_migrated_url = get_stable_url(endpoints['migrated'], in_legacy=False)
+    stable_legacy_params = get_stable_elements(params['query'], in_legacy=True)
+    stable_migrated_params = get_stable_elements(params['query'], in_legacy=False)
     stable_legacy_body = get_stable_elements(body, in_legacy=True)
     stable_migrated_body = get_stable_elements(body, in_legacy=False)
 
     # Test URL and path variables
     path_discrepencies = Discrepencies()
 
-    for path_pattern, path_variables in params.path.items():
+    for path_pattern, path_variables in params['path'].items():
         for path_variable in path_variables[1:]:
             temp_legacy_url = endpoints.legacy.replace(path_pattern, get_keyword_code(path_variable))
             temp_legacy_url = get_stable_url(temp_legacy_url, in_legacy=True)
@@ -144,7 +148,7 @@ def run_tests():
 
     unstable_legacy_params = stable_legacy_params
     unstable_migrated_params = stable_migrated_params
-    for attr, values in params.query.items():
+    for attr, values in params['query'].items():
         for value in values[1:]:
             unstable_legacy_params[attr] = get_keyword_code(value, in_legacy=True)
             unstable_migrated_params[attr] = get_keyword_code(value, in_legacy=False)
@@ -159,7 +163,7 @@ def run_tests():
 
     unstable_legacy_body = stable_legacy_body
     unstable_migrated_body = stable_migrated_body
-    for attr, values in params.query.items():
+    for attr, values in body.items():
         for value in values[1:]:
             unstable_legacy_body[attr] = get_keyword_code(value, in_legacy=True)
             unstable_migrated_body[attr] = get_keyword_code(value, in_legacy=False)
@@ -175,21 +179,21 @@ def generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
     output = ""
 
     total_path_options = 0
-    for options in params.path.values():
+    for options in params['path'].values():
         total_path_options += len(options)
     if len(path_discrepencies) > 0:
         output += path_discrepencies.tablify()
-    elif len(params.path.items()) == total_path_options:
+    elif len(params['path'].items()) == total_path_options:
         output += "No testing done for **path**...\n\n"
     else:
         output += "No discrepencies found in the **path testing**...\n\n"
 
     total_param_options = 0
-    for options in params.query.values():
+    for options in params['query'].values():
         total_param_options += len(options)
     if len(param_discrepencies) > 0:
         output += param_discrepencies.tablify()
-    elif len(params.query) == total_param_options:
+    elif len(params['query']) == total_param_options:
         output += "No testing done for **params**...\n\n"
     else:
         output += "No discrepencies found in the **params testing**...\n\n"
@@ -294,7 +298,7 @@ if __name__ == "__main__":
         endpoints = read_json(args.endpoints)
         # validate format
         EXPECTED_ENDPOINT_FIELDS = ["legacy", "migrated", "method"]
-        if len(endpoints.keys()) != len(EXPECTED_ENDPOINT_FIELDS) or not all(attr in endpoints.key() for attr in EXPECTED_ENDPOINT_FIELDS):
+        if len(endpoints.keys()) != len(EXPECTED_ENDPOINT_FIELDS) or not all(attr in endpoints.keys() for attr in EXPECTED_ENDPOINT_FIELDS):
             print(f"Expected {len(EXPECTED_ENDPOINT_FIELDS)} fields in {args.endpoints}: {EXPECTED_ENDPOINT_FIELDS}...")
             sys.exit()
         if not all(type(value) == str for value in endpoints.values()):
