@@ -5,6 +5,9 @@ import json
 import requests
 from deepdiff import DeepDiff
 
+# TODO: make it so that it is a single json file
+# TODO: include $omit functionality
+
 class Discrepencies():
     def __init__(self):
         self.discrepencies = []
@@ -33,6 +36,17 @@ endpoints = {}
 
 # Appropiate requests API function eg. requests.get, requests.post, etc...
 call_api = None
+
+def read_json(path):
+    try:
+        with open(path, 'r') as file:
+            json_contents = json.load(file)
+    except json.JSONDecodeError as e:
+        print(f"There was an error reading the file {args.config}. Ensure that this file is JSON formatted. Paste your file into https://jsonlint.com/ to find errors")
+        sys.exit()
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        sys.exit()
 
 def get_keyword_code(keyword, in_legacy):
     if type(keyword) == str and keyword in custom:
@@ -213,30 +227,13 @@ def generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process some JSON files.")
-
-    parser.add_argument("-p", "--params", type=str, required=False, help="Path to params.json")
-    parser.add_argument("-b", "--body", type=str, required=False, help="Path to body.json")
-    parser.add_argument("-H", "--headers", type=str, required=False, help="Path to headers.json")
-    parser.add_argument("-e", "--endpoints", type=str, required=True, help="Path to endpoints.json")
-    parser.add_argument("-c", "--custom", type=str, required=False, help="Path to custom.json")
-
+    parser.add_argument('config', type=str, help="Path to the JSON configuration file")
     args = parser.parse_args()
+    
+    config = read_json(args.config)
 
-    def path_does_not_exist(path):
-        print(f"The path `{path}` does not exist...")
-        sys.exit()
-
-    def read_json(path):
-        try:
-            with open(path, 'r') as file:
-                json_contents = json.load(file)
-        except:
-            print(f"There was an error reading the file {path}. Ensure that this file is json formatted. Paste your file into https://jsonlint.com/ to find errors")
-            sys.exit()
-        return json_contents
-
-    if args.custom and os.path.exists(args.custom):
-        custom = read_json(args.custom)
+    if "custom" in config:
+        custom = config["custom"]
 
         # validate custom
         MIN_KEYWORD_SIZE = 2
@@ -247,11 +244,9 @@ if __name__ == "__main__":
             if type(options) != list or len(options) != 2:
                 print(f"Custom values must be an array of size two. The value specified with '{keyword}': {options} in `{args.custom}` fails...")
                 sys.exit()
-    elif args.custom:
-        path_does_not_exist(args.custom)
 
-    if args.params and os.path.exists(args.params):
-        params = read_json(args.params)
+    if "params" in config:
+        params = config["params"]
 
         # validate params
         EXPECTED_PARAM_FIELDS = ["path", "query"]
@@ -275,27 +270,21 @@ if __name__ == "__main__":
                 if type(option) == str and option[0] == '$' and option not in custom:
                     print(f"Custom keywords like {option} in {params} must be defined in {args.params}...")
                     sys.exit()
-    elif args.params:
-        path_does_not_exist(args.params)
 
-    if args.body and os.path.exists(args.body):
-        body = read_json(args.body)
+    if "body" in config:
+        body = config["body"]
         # validate body
         for attr in body:
             for option in body[attr]:
                 if type(option) == str and option[0] == '$' and option not in custom:
                     print(f"Custom keywords like {option} in {body} must be defined in ${args.custom}...")
                     sys.exit()
-    elif args.body:
-        path_does_not_exist(args.body)
 
-    if args.headers and os.path.exists(args.headers):
-        headers = read_json(args.headers)
-    elif args.headers:
-        path_does_not_exist(args.headers)
+    if "headers" in config:
+        headers = config["headers"]
 
-    if os.path.exists(args.endpoints):
-        endpoints = read_json(args.endpoints)
+    if "endpoints" in config:
+        endpoints = config["endpoints"]
         # validate format
         EXPECTED_ENDPOINT_FIELDS = ["legacy", "migrated", "method"]
         if len(endpoints.keys()) != len(EXPECTED_ENDPOINT_FIELDS) or not all(attr in endpoints.keys() for attr in EXPECTED_ENDPOINT_FIELDS):
@@ -318,7 +307,8 @@ if __name__ == "__main__":
             elif method == "OPTIONS": call_api = requests.options
             elif method == "HEAD": call_api = requests.head
     else:
-        path_does_not_exist(args.endpoints)
+        print(f"The endpoints attribute is required...")
+        sys.exit()
     
     establish_baseline()
 
