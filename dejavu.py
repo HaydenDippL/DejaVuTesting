@@ -18,11 +18,15 @@ class Discrepencies():
         self.discrepencies.append([attr, val, legacy_code, migrated_code])
 
     def tablify(self):
-        output += "|Attributes|Input|Legacy|Migrated|\n"
-        output += "|:-:|:-:|:-:|:-:|"
+        table = "|Attributes|Input|Legacy|Migrated|\n"
+        table += "|:-:|:-:|:-:|:-:|\n"
         for attr, val, legacy_code, migrated_code in self.discrepencies:
             val = '"' + val + '"' if type(val) == str else val
-            output += f"|`{attr}`|`{val}`|{legacy_code}|{migrated_code}|\n\n"
+            table += f"|`{attr}`|`{val}`|{legacy_code}|{migrated_code}|\n"
+        table += "\n"
+        return table
+
+SPECIAL_CODES = ["$omit"]
 
 custom = {}
 path = {}
@@ -67,6 +71,11 @@ def get_stable_elements(dict, in_legacy):
         for key, value in dict.items()
     }
 
+def remove_omit_keys(dict):
+    omit_keys = [attr for attr, value in dict.items() if value == "$omit"]
+    for key in omit_keys:
+        del dict[key]
+
 def get_stable_url(url, in_legacy):
     for path_pattern, path_variable in get_stable_elements(path, in_legacy=in_legacy).items():
         url = url.replace(path_pattern, str(path_variable))
@@ -77,13 +86,9 @@ def establish_baseline():
     for path_match, path_variable in get_stable_elements(path, in_legacy=False).items():
         legacy_url = legacy_url.replace(path_match, str(path_variable))
     legacy_stable_query = get_stable_elements(query, in_legacy=True)
-    for attr, value in legacy_stable_query.items():
-        if value == "$omit":
-            del legacy_stable_query[attr]
     legacy_stable_body = get_stable_elements(body, in_legacy=True)
-    for attr, value in legacy_stable_body.items():
-        if value == "$omit":
-            del legacy_stable_body[attr]
+    remove_omit_keys(legacy_stable_query)
+    remove_omit_keys(legacy_stable_body)
 
     legacy_response = call_api(
         legacy_url, 
@@ -96,13 +101,9 @@ def establish_baseline():
     for path_match, path_variable in get_stable_elements(path, in_legacy=False).items():
         migrated_url = migrated_url.replace(path_match, str(path_variable))
     migrated_stable_query = get_stable_elements(query, in_legacy=False)
-    for attr, value in migrated_stable_query.items():
-        if value == "$omit":
-            del migrated_stable_query[attr]
     migrated_stable_body = get_stable_elements(body, in_legacy=False)
-    for attr, value in migrated_stable_query.items():
-        if value == "$omit":
-            del migrated_stable_body[attr]
+    remove_omit_keys(migrated_stable_query)
+    remove_omit_keys(migrated_stable_body)
     
     migrated_response = call_api(
         migrated_url,
@@ -128,7 +129,7 @@ def establish_baseline():
             """)
         sys.exit()
 
-def run_test(legacy_url, migrated_url, headers, legacy_params, migrated_params, legacy_body, migrated_body, discrepencies):
+def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migrated_params, legacy_body, migrated_body, discrepencies):
     legacy_response = call_api(
         legacy_url,
         headers=headers,
@@ -146,11 +147,13 @@ def run_test(legacy_url, migrated_url, headers, legacy_params, migrated_params, 
     if legacy_response.status_code != migrated_response.status_code:
         discrepencies.add(attr, value, legacy_response.status_code, migrated_response.status_code)
     elif legacy_response.status_code == 200 and migrated_response.status_code == 200:
-        diff = DeepDiff(legacy_response, migrated_response)
+        legacy_response_json = json.loads(legacy_response.text)
+        migrated_response_json = json.loads(migrated_response.text)
+        diff = DeepDiff(legacy_response_json, migrated_response_json)
         for attr in diff.get("dictionary_item_removed", {}):
             discrepencies.add(attr, "Missing", "", "")
         for attr, change in diff.get("values_changed", {}).items():
-            discrepencies.add(attr, "Changed", change.old_value, change.new_value)
+            discrepencies.add(attr, "Changed", change['old_value'], change['new_value'])
 
 def run_tests():
     # Initialize stable variables
@@ -171,7 +174,7 @@ def run_tests():
             temp_migrated_url = endpoints.migrated.replace(path_pattern, get_keyword_code(path_variable))
             temp_migrated_url = get_stable_url(temp_migrated_url, in_legacy=False)
 
-            run_test(temp_legacy_url, temp_migrated_url, headers, stable_legacy_params, stable_migrated_params, stable_legacy_body, stable_migrated_body, path_discrepencies)
+            run_test(temp_legacy_url, temp_migrated_url, path_pattern, path_variable, headers, stable_legacy_params, stable_migrated_params, stable_legacy_body, stable_migrated_body, path_discrepencies)
 
     # Test param queries
     param_discrepencies = Discrepencies()
@@ -180,21 +183,15 @@ def run_tests():
     unstable_migrated_params = stable_migrated_params
     for attr, values in query.items():
         for value in values[1:]:
-            if value == "$omit":
-                del unstable_legacy_params[attr]
-                del unstable_migrated_params[attr]
-            else:
-                unstable_legacy_params[attr] = get_keyword_code(value, in_legacy=True)
-                unstable_migrated_params[attr] = get_keyword_code(value, in_legacy=False)
+            unstable_legacy_params[attr] = get_keyword_code(value, in_legacy=True)
+            unstable_migrated_params[attr] = get_keyword_code(value, in_legacy=False)
+            remove_omit_keys(unstable_legacy_params)
+            remove_omit_keys(unstable_migrated_params)
 
-            run_test(stable_legacy_url, stable_migrated_url, headers, unstable_legacy_params, unstable_migrated_params, stable_legacy_body, stable_migrated_body, param_discrepencies)
+            run_test(stable_legacy_url, stable_migrated_url, attr, value, headers, unstable_legacy_params, unstable_migrated_params, stable_legacy_body, stable_migrated_body, param_discrepencies)
 
-        if values[0] == "$omit":
-            del unstable_legacy_params[values[0]]
-            del unstable_migrated_params[values[0]]
-        else:
-            unstable_legacy_params[attr] = get_keyword_code(values[0], in_legacy=True)
-            unstable_migrated_params[attr] = get_keyword_code(values[0], in_legacy=False)
+        unstable_legacy_params[attr] = get_keyword_code(values[0], in_legacy=True)
+        unstable_migrated_params[attr] = get_keyword_code(values[0], in_legacy=False)
 
     # Test body
     body_discrepencies = Discrepencies()
@@ -203,21 +200,15 @@ def run_tests():
     unstable_migrated_body = stable_migrated_body
     for attr, values in body.items():
         for value in values[1:]:
-            if value == "$omit":
-                del unstable_legacy_body[attr]
-                del unstable_migrated_body[attr]
-            else:
-                unstable_legacy_body[attr] = get_keyword_code(value, in_legacy=True)
-                unstable_migrated_body[attr] = get_keyword_code(value, in_legacy=False)
+            unstable_legacy_body[attr] = get_keyword_code(value, in_legacy=True)
+            unstable_migrated_body[attr] = get_keyword_code(value, in_legacy=False)
+            remove_omit_keys(unstable_legacy_body)
+            remove_omit_keys(unstable_migrated_body)
 
-            run_test(stable_legacy_url, stable_migrated_url, headers, stable_legacy_params, stable_migrated_params, unstable_legacy_body, unstable_migrated_body, body_discrepencies)
-                
-        if values[0] == "$omit":
-            del unstable_legacy_body[values[0]]
-            del unstable_migrated_body[values[0]]
-        else:
-            unstable_legacy_body[attr] = get_keyword_code(values[0], in_legacy=True)
-            unstable_migrated_body[attr] = get_keyword_code(values[0], in_legacy=False)
+            run_test(stable_legacy_url, stable_migrated_url, attr, value, headers, stable_legacy_params, stable_migrated_params, unstable_legacy_body, unstable_migrated_body, body_discrepencies)
+        
+        unstable_legacy_body[attr] = get_keyword_code(values[0], in_legacy=True)
+        unstable_migrated_body[attr] = get_keyword_code(values[0], in_legacy=False)
     
     return (path_discrepencies, param_discrepencies, body_discrepencies)
 
@@ -299,7 +290,7 @@ if __name__ == "__main__":
 
         for attr, options in query.items():
             for option in options:
-                if type(option) == str and option[0] == '$' and option not in custom:
+                if type(option) == str and len(option) > 0 and option[0] == '$' and option not in custom and option not in SPECIAL_CODES:
                     print(f"Custom keywords like {option} in {attr} must be defined in the custom field...")
                     sys.exit()
 
@@ -308,7 +299,7 @@ if __name__ == "__main__":
         # validate body
         for attr in body:
             for option in body[attr]:
-                if type(option) == str and option[0] == '$' and option not in custom:
+                if type(option) == str and len(option) > 0 and option[0] == '$' and option not in custom and option not in SPECIAL_CODES:
                     print(f"Custom keywords like {option} in {body} must be defined in custom attribute...")
                     sys.exit()
 
@@ -349,3 +340,5 @@ if __name__ == "__main__":
     output = generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
 
     print(output)
+    with open("results.md", 'w') as file:
+        file.write(output)
