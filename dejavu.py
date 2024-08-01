@@ -77,7 +77,13 @@ def establish_baseline():
     for path_match, path_variable in get_stable_elements(path, in_legacy=False).items():
         legacy_url = legacy_url.replace(path_match, str(path_variable))
     legacy_stable_query = get_stable_elements(query, in_legacy=True)
+    for attr, value in legacy_stable_query.items():
+        if value == "$omit":
+            del legacy_stable_query[attr]
     legacy_stable_body = get_stable_elements(body, in_legacy=True)
+    for attr, value in legacy_stable_body.items():
+        if value == "$omit":
+            del legacy_stable_body[attr]
 
     legacy_response = call_api(
         legacy_url, 
@@ -90,7 +96,13 @@ def establish_baseline():
     for path_match, path_variable in get_stable_elements(path, in_legacy=False).items():
         migrated_url = migrated_url.replace(path_match, str(path_variable))
     migrated_stable_query = get_stable_elements(query, in_legacy=False)
+    for attr, value in migrated_stable_query.items():
+        if value == "$omit":
+            del migrated_stable_query[attr]
     migrated_stable_body = get_stable_elements(body, in_legacy=False)
+    for attr, value in migrated_stable_query.items():
+        if value == "$omit":
+            del migrated_stable_body[attr]
     
     migrated_response = call_api(
         migrated_url,
@@ -168,13 +180,21 @@ def run_tests():
     unstable_migrated_params = stable_migrated_params
     for attr, values in query.items():
         for value in values[1:]:
-            unstable_legacy_params[attr] = get_keyword_code(value, in_legacy=True)
-            unstable_migrated_params[attr] = get_keyword_code(value, in_legacy=False)
+            if value == "$omit":
+                del unstable_legacy_params[attr]
+                del unstable_migrated_params[attr]
+            else:
+                unstable_legacy_params[attr] = get_keyword_code(value, in_legacy=True)
+                unstable_migrated_params[attr] = get_keyword_code(value, in_legacy=False)
 
             run_test(stable_legacy_url, stable_migrated_url, headers, unstable_legacy_params, unstable_migrated_params, stable_legacy_body, stable_migrated_body, param_discrepencies)
 
-        unstable_legacy_params[attr] = get_keyword_code(values[0], in_legacy=True)
-        unstable_migrated_params[attr] = get_keyword_code(values[0], in_legacy=False)
+        if values[0] == "$omit":
+            del unstable_legacy_params[values[0]]
+            del unstable_migrated_params[values[0]]
+        else:
+            unstable_legacy_params[attr] = get_keyword_code(values[0], in_legacy=True)
+            unstable_migrated_params[attr] = get_keyword_code(values[0], in_legacy=False)
 
     # Test body
     body_discrepencies = Discrepencies()
@@ -183,13 +203,21 @@ def run_tests():
     unstable_migrated_body = stable_migrated_body
     for attr, values in body.items():
         for value in values[1:]:
-            unstable_legacy_body[attr] = get_keyword_code(value, in_legacy=True)
-            unstable_migrated_body[attr] = get_keyword_code(value, in_legacy=False)
+            if value == "$omit":
+                del unstable_legacy_body[attr]
+                del unstable_migrated_body[attr]
+            else:
+                unstable_legacy_body[attr] = get_keyword_code(value, in_legacy=True)
+                unstable_migrated_body[attr] = get_keyword_code(value, in_legacy=False)
 
             run_test(stable_legacy_url, stable_migrated_url, headers, stable_legacy_params, stable_migrated_params, unstable_legacy_body, unstable_migrated_body, body_discrepencies)
                 
-        unstable_legacy_body[attr] = get_keyword_code(values[0], in_legacy=True)
-        unstable_migrated_body[attr] = get_keyword_code(values[0], in_legacy=False)
+        if values[0] == "$omit":
+            del unstable_legacy_body[values[0]]
+            del unstable_migrated_body[values[0]]
+        else:
+            unstable_legacy_body[attr] = get_keyword_code(values[0], in_legacy=True)
+            unstable_migrated_body[attr] = get_keyword_code(values[0], in_legacy=False)
     
     return (path_discrepencies, param_discrepencies, body_discrepencies)
 
