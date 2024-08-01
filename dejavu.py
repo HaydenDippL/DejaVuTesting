@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import requests
+from deepdiff import DeepDiff
 
 class Discrepencies():
     def __init__(self):
@@ -93,6 +94,30 @@ def establish_baseline():
             """)
         sys.exit()
 
+def run_test(legacy_url, migrated_url, headers, legacy_params, migrated_params, legacy_body, migrated_body, discrepencies):
+    legacy_response = call_api(
+        legacy_url,
+        headers=headers,
+        params=legacy_params,
+        body=legacy_body
+    )
+
+    migrated_response = call_api(
+        migrated_url,
+        headers=headers,
+        params=migrated_params,
+        body=migrated_body
+    )
+
+    if legacy_response.status_code != migrated_response.status_code:
+        discrepencies.add(attr, value, legacy_response.status_code, migrated_response.status_code)
+    elif legacy_response.status_code == 200 and migrated_response.status_code == 200:
+        diff = DeepDiff(legacy_response, migrated_response)
+        for attr in diff.get("dictionary_item_removed", {}):
+            discrepencies.add(attr, "Missing", "", "")
+        for attr, change in diff.get("values_changed", {}).items():
+            discrepencies.add(attr, "Changed", change.old_value, change.new_value)
+
 def run_tests():
     # Initialize stable variables
     stable_legacy_url = get_stable_url(endpoints.legacy, in_legacy=True)
@@ -109,26 +134,10 @@ def run_tests():
         for path_variable in path_variables[1:]:
             temp_legacy_url = endpoints.legacy.replace(path_pattern, get_keyword_code(path_variable))
             temp_legacy_url = get_stable_url(temp_legacy_url, in_legacy=True)
-
-            legacy_response = call_api(
-                temp_legacy_url,
-                headers=headers,
-                params=stable_legacy_params,
-                body=stable_legacy_body
-            )
-
             temp_migrated_url = endpoints.migrated.replace(path_pattern, get_keyword_code(path_variable))
-            temp_migrated_url = get_stable_url(temp_migrated_url)
+            temp_migrated_url = get_stable_url(temp_migrated_url, in_legacy=False)
 
-            migrated_response = call_api(
-                temp_migrated_url,
-                headers=headers,
-                params=stable_migrated_params,
-                body=stable_migrated_body
-            )
-
-            if legacy_response.status_code != migrated_response.status_code:
-                path_discrepencies.add(path_pattern, path_variable, legacy_response.status_code, migrated_response.status_code)
+            run_test(temp_legacy_url, temp_migrated_url, headers, stable_legacy_params, stable_migrated_params, stable_legacy_body, stable_migrated_body, path_discrepencies)
 
     # Test param queries
     param_discrepencies = Discrepencies()
@@ -138,25 +147,9 @@ def run_tests():
     for attr, values in params.query.items():
         for value in values[1:]:
             unstable_legacy_params[attr] = get_keyword_code(value, in_legacy=True)
-
-            legacy_response = call_api(
-                stable_legacy_url,
-                headers=headers,
-                params=unstable_legacy_params,
-                body=stable_legacy_body
-            )
-
             unstable_migrated_params[attr] = get_keyword_code(value, in_legacy=False)
 
-            migrated_response = call_api(
-                stable_migrated_url,
-                headers=headers,
-                params=unstable_migrated_params,
-                body=stable_migrated_body
-            )
-
-            if legacy_response.status_code != migrated_response.status_code:
-                param_discrepencies.add(attr, value, legacy_response.status_code, migrated_response.status_code)
+            run_test(stable_legacy_url, stable_migrated_url, headers, unstable_legacy_params, unstable_migrated_params, stable_legacy_body, stable_migrated_body, param_discrepencies)
 
         unstable_legacy_params[attr] = get_keyword_code(values[0], in_legacy=True)
         unstable_migrated_params[attr] = get_keyword_code(values[0], in_legacy=False)
@@ -169,26 +162,10 @@ def run_tests():
     for attr, values in params.query.items():
         for value in values[1:]:
             unstable_legacy_body[attr] = get_keyword_code(value, in_legacy=True)
-
-            legacy_response = call_api(
-                stable_legacy_url,
-                headers=headers,
-                params=stable_legacy_params,
-                body=unstable_legacy_body
-            )
-            
             unstable_migrated_body[attr] = get_keyword_code(value, in_legacy=False)
 
-            migrated_response = call_api(
-                stable_migrated_url,
-                headers=headers,
-                params=stable_migrated_params,
-                body=unstable_migrated_body
-            )
-
-            if legacy_response.status_code != migrated_response.status_code:
-                body_discrepencies.add(attr, value, legacy_response.status_code, migrated_response.status_code)
-
+            run_test(stable_legacy_url, stable_migrated_url, headers, stable_legacy_params, stable_migrated_params, unstable_legacy_body, unstable_migrated_body, body_discrepencies)
+                
         unstable_legacy_body[attr] = get_keyword_code(values[0], in_legacy=True)
         unstable_migrated_body[attr] = get_keyword_code(values[0], in_legacy=False)
     
