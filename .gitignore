@@ -3,3 +3,4 @@
 
 # ignore the config json files
 *.json
+results.md
