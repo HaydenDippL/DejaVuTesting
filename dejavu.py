@@ -178,10 +178,9 @@ def run_tests():
 
     # Test param queries
     param_discrepencies = Discrepencies()
-
-    unstable_legacy_params = stable_legacy_params
-    unstable_migrated_params = stable_migrated_params
     for attr, values in query.items():
+        unstable_legacy_params = stable_legacy_params.copy()
+        unstable_migrated_params = stable_migrated_params.copy()
         for value in values[1:]:
             unstable_legacy_params[attr] = get_keyword_code(value, in_legacy=True)
             unstable_migrated_params[attr] = get_keyword_code(value, in_legacy=False)
@@ -190,15 +189,12 @@ def run_tests():
 
             run_test(stable_legacy_url, stable_migrated_url, attr, value, headers, unstable_legacy_params, unstable_migrated_params, stable_legacy_body, stable_migrated_body, param_discrepencies)
 
-        unstable_legacy_params[attr] = get_keyword_code(values[0], in_legacy=True)
-        unstable_migrated_params[attr] = get_keyword_code(values[0], in_legacy=False)
-
     # Test body
     body_discrepencies = Discrepencies()
 
-    unstable_legacy_body = stable_legacy_body
-    unstable_migrated_body = stable_migrated_body
     for attr, values in body.items():
+        unstable_legacy_body = stable_legacy_body.copy()
+        unstable_migrated_body = stable_migrated_body.copy()
         for value in values[1:]:
             unstable_legacy_body[attr] = get_keyword_code(value, in_legacy=True)
             unstable_migrated_body[attr] = get_keyword_code(value, in_legacy=False)
@@ -206,9 +202,6 @@ def run_tests():
             remove_omit_keys(unstable_migrated_body)
 
             run_test(stable_legacy_url, stable_migrated_url, attr, value, headers, stable_legacy_params, stable_migrated_params, unstable_legacy_body, unstable_migrated_body, body_discrepencies)
-        
-        unstable_legacy_body[attr] = get_keyword_code(values[0], in_legacy=True)
-        unstable_migrated_body[attr] = get_keyword_code(values[0], in_legacy=False)
     
     return (path_discrepencies, param_discrepencies, body_discrepencies)
 
