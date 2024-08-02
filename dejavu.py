@@ -4,7 +4,6 @@ import json
 import requests
 from deepdiff import DeepDiff
 
-# TODO: include $omit functionality
 # TODO: maybe add recursive testing?
 
 class Discrepencies():
