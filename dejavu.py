@@ -80,6 +80,85 @@ def get_stable_url(url, in_legacy):
         url = url.replace(path_pattern, str(path_variable))
     return url
 
+def validate_input(config):
+    if "custom" in config:
+        custom = config["custom"]
+
+        # validate custom
+        MIN_KEYWORD_SIZE = 2
+        for keyword, options in custom.items():
+            if len(keyword) < MIN_KEYWORD_SIZE or keyword[0] != '$':
+                print(f"Custom keywords must be prefaced with '$' and cannot be less than {MIN_KEYWORD_SIZE} characters. The '{keyword}' in the custom attribute fails...")
+                sys.exit()
+            if type(options) != list or len(options) != 2:
+                print(f"Custom values must be an array of size two. The value specified with '{keyword}': {options} in custom attribute fails...")
+                sys.exit()
+
+    if "path" in config:
+        path = config["path"]
+
+        EXPECTED_PARAM_FIELDS = ["path", "query"]
+        MIN_PATH_ATTR_SIZE = 2
+        for attr, value in path.items():
+            if type(attr) != str or len(attr) < MIN_PATH_ATTR_SIZE or not all(ch.isupper() for ch in attr[1:]):
+                print(f"Path variables must be prefaced with a `@` and be atleast {MIN_PATH_ATTR_SIZE}. {attr} fails...")
+                sys.exit()
+            if type(value) != list or len(value) < 1:
+                print(f"There must be atleast one option in the {attr} array in path...")
+                sys.exit()
+            for option in value:
+                if type(option) == str and option[0] == '$' and option not in custom:
+                    print(f"Custom keywords like {option} in {attr} must be defined in the custom field...")
+                    sys.exit()
+
+    if "query" in config:
+        query = config["query"]
+
+        for attr, options in query.items():
+            for option in options:
+                if type(option) == str and len(option) > 0 and option[0] == '$' and option not in custom and option not in SPECIAL_CODES:
+                    print(f"Custom keywords like {option} in {attr} must be defined in the custom field...")
+                    sys.exit()
+
+    if "body" in config:
+        body = config["body"]
+        # validate body
+        for attr in body:
+            for option in body[attr]:
+                if type(option) == str and len(option) > 0 and option[0] == '$' and option not in custom and option not in SPECIAL_CODES:
+                    print(f"Custom keywords like {option} in {body} must be defined in custom attribute...")
+                    sys.exit()
+
+    if "headers" in config:
+        headers = config["headers"]
+
+    if "endpoints" in config:
+        endpoints = config["endpoints"]
+        # validate format
+        EXPECTED_ENDPOINT_FIELDS = ["legacy", "migrated", "method"]
+        if len(endpoints.keys()) != len(EXPECTED_ENDPOINT_FIELDS) or not all(attr in endpoints.keys() for attr in EXPECTED_ENDPOINT_FIELDS):
+            print(f"Expected {len(EXPECTED_ENDPOINT_FIELDS)} fields in endpoints attribute: {EXPECTED_ENDPOINT_FIELDS}...")
+            sys.exit()
+        if not all(type(value) == str for value in endpoints.values()):
+            print(f"All values in endpoints attribute must be strings...")
+            sys.exit()
+        EXPECTED_ENDPOINT_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
+        method = endpoints["method"].upper()
+        if method not in EXPECTED_ENDPOINT_METHODS:
+            print(f"The endpoint method in {endpoints} must be in {EXPECTED_ENDPOINT_FIELDS}, but {endpoints["method"]} was not...")
+            sys.exit()
+        else:
+            if method == "GET": call_api = requests.get
+            elif method == "POST": call_api = requests.post
+            elif method == "PUT": call_api = requests.put
+            elif method == "DELETE": call_api = requests.delete
+            elif method == "PATCH": call_api = requests.patch
+            elif method == "OPTIONS": call_api = requests.options
+            elif method == "HEAD": call_api = requests.head
+    else:
+        print(f"The endpoints attribute is required...")
+        sys.exit()
+
 def establish_baseline():
     legacy_url = endpoints['legacy']
     for path_match, path_variable in get_stable_elements(path, in_legacy=False).items():
@@ -247,84 +326,8 @@ if __name__ == "__main__":
     
     config = read_json(args.config)
 
-    if "custom" in config:
-        custom = config["custom"]
+    validate_input(config)
 
-        # validate custom
-        MIN_KEYWORD_SIZE = 2
-        for keyword, options in custom.items():
-            if len(keyword) < MIN_KEYWORD_SIZE or keyword[0] != '$':
-                print(f"Custom keywords must be prefaced with '$' and cannot be less than {MIN_KEYWORD_SIZE} characters. The '{keyword}' in the custom attribute fails...")
-                sys.exit()
-            if type(options) != list or len(options) != 2:
-                print(f"Custom values must be an array of size two. The value specified with '{keyword}': {options} in custom attribute fails...")
-                sys.exit()
-
-    if "path" in config:
-        path = config["path"]
-
-        EXPECTED_PARAM_FIELDS = ["path", "query"]
-        MIN_PATH_ATTR_SIZE = 2
-        for attr, value in path.items():
-            if type(attr) != str or len(attr) < MIN_PATH_ATTR_SIZE or not all(ch.isupper() for ch in attr[1:]):
-                print(f"Path variables must be prefaced with a `@` and be atleast {MIN_PATH_ATTR_SIZE}. {attr} fails...")
-                sys.exit()
-            if type(value) != list or len(value) < 1:
-                print(f"There must be atleast one option in the {attr} array in path...")
-                sys.exit()
-            for option in value:
-                if type(option) == str and option[0] == '$' and option not in custom:
-                    print(f"Custom keywords like {option} in {attr} must be defined in the custom field...")
-                    sys.exit()
-
-    if "query" in config:
-        query = config["query"]
-
-        for attr, options in query.items():
-            for option in options:
-                if type(option) == str and len(option) > 0 and option[0] == '$' and option not in custom and option not in SPECIAL_CODES:
-                    print(f"Custom keywords like {option} in {attr} must be defined in the custom field...")
-                    sys.exit()
-
-    if "body" in config:
-        body = config["body"]
-        # validate body
-        for attr in body:
-            for option in body[attr]:
-                if type(option) == str and len(option) > 0 and option[0] == '$' and option not in custom and option not in SPECIAL_CODES:
-                    print(f"Custom keywords like {option} in {body} must be defined in custom attribute...")
-                    sys.exit()
-
-    if "headers" in config:
-        headers = config["headers"]
-
-    if "endpoints" in config:
-        endpoints = config["endpoints"]
-        # validate format
-        EXPECTED_ENDPOINT_FIELDS = ["legacy", "migrated", "method"]
-        if len(endpoints.keys()) != len(EXPECTED_ENDPOINT_FIELDS) or not all(attr in endpoints.keys() for attr in EXPECTED_ENDPOINT_FIELDS):
-            print(f"Expected {len(EXPECTED_ENDPOINT_FIELDS)} fields in endpoints attribute: {EXPECTED_ENDPOINT_FIELDS}...")
-            sys.exit()
-        if not all(type(value) == str for value in endpoints.values()):
-            print(f"All values in endpoints attribute must be strings...")
-            sys.exit()
-        EXPECTED_ENDPOINT_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
-        method = endpoints["method"].upper()
-        if method not in EXPECTED_ENDPOINT_METHODS:
-            print(f"The endpoint method in {endpoints} must be in {EXPECTED_ENDPOINT_FIELDS}, but {endpoints["method"]} was not...")
-            sys.exit()
-        else:
-            if method == "GET": call_api = requests.get
-            elif method == "POST": call_api = requests.post
-            elif method == "PUT": call_api = requests.put
-            elif method == "DELETE": call_api = requests.delete
-            elif method == "PATCH": call_api = requests.patch
-            elif method == "OPTIONS": call_api = requests.options
-            elif method == "HEAD": call_api = requests.head
-    else:
-        print(f"The endpoints attribute is required...")
-        sys.exit()
-    
     establish_baseline()
 
     path_discrepencies, param_discrepencies, body_discrepencies = run_tests()
