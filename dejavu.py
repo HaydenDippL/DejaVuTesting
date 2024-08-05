@@ -57,17 +57,16 @@ def read_json(file_path):
 
 def get_keyword_code(keyword, in_legacy):
     if type(keyword) == str and keyword in custom:
-        if type(custom.keyword) == list:
-            return custom.keyword[0] if in_legacy else custom.keyword[1]
+        if type(custom[keyword]) == list:
+            return custom[keyword][0] if in_legacy else custom[keyword][1]
         else:
-            return custom.keyword
+            return custom[keyword]
     else:
         return keyword
 
 def get_stable_elements(dict, in_legacy):
     return {
-        key: value[0] if key not in custom else get_keyword_code(key, in_legacy) 
-        for key, value in dict.items()
+        key: get_keyword_code(values[0], in_legacy) for key, values in dict.items()
     }
 
 def remove_omit_keys(dict):
@@ -82,6 +81,7 @@ def get_stable_url(url, in_legacy):
 
 def validate_input(config):
     if "custom" in config:
+        global custom
         custom = config["custom"]
 
         # validate custom
@@ -95,6 +95,7 @@ def validate_input(config):
                 sys.exit()
 
     if "path" in config:
+        global path
         path = config["path"]
 
         EXPECTED_PARAM_FIELDS = ["path", "query"]
@@ -112,6 +113,7 @@ def validate_input(config):
                     sys.exit()
 
     if "query" in config:
+        global query
         query = config["query"]
 
         for attr, options in query.items():
@@ -121,6 +123,7 @@ def validate_input(config):
                     sys.exit()
 
     if "body" in config:
+        global body
         body = config["body"]
         # validate body
         for attr in body:
@@ -130,9 +133,11 @@ def validate_input(config):
                     sys.exit()
 
     if "headers" in config:
+        global headers
         headers = config["headers"]
 
     if "endpoints" in config:
+        global endpoints
         endpoints = config["endpoints"]
         # validate format
         EXPECTED_ENDPOINT_FIELDS = ["legacy", "migrated", "method"]
@@ -148,6 +153,7 @@ def validate_input(config):
             print(f"The endpoint method in {endpoints} must be in {EXPECTED_ENDPOINT_FIELDS}, but {endpoints["method"]} was not...")
             sys.exit()
         else:
+            global call_api
             if method == "GET": call_api = requests.get
             elif method == "POST": call_api = requests.post
             elif method == "PUT": call_api = requests.put
@@ -228,10 +234,10 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         legacy_response_json = json.loads(legacy_response.text)
         migrated_response_json = json.loads(migrated_response.text)
         diff = DeepDiff(legacy_response_json, migrated_response_json)
-        for attr in diff.get("dictionary_item_removed", {}):
-            discrepencies.add(attr, "Missing", "", "")
-        for attr, change in diff.get("values_changed", {}).items():
-            discrepencies.add(attr, "Changed", change['old_value'], change['new_value'])
+        for changed_attr in diff.get("dictionary_item_removed", {}):
+            discrepencies.add(attr, value, "", f"Missing: {attr}")
+        for changed_attr, change in diff.get("values_changed", {}).items():
+            discrepencies.add(attr, value, f"Changed: {changed_attr} to {change['old_value']}", f"Changed: {changed_attr} to {change['new_value']}")
 
 def run_tests():
     # Initialize stable variables
@@ -247,9 +253,9 @@ def run_tests():
 
     for path_pattern, path_variables in path.items():
         for path_variable in path_variables[1:]:
-            temp_legacy_url = endpoints.legacy.replace(path_pattern, get_keyword_code(path_variable))
+            temp_legacy_url = endpoints['legacy'].replace(path_pattern, str(get_keyword_code(path_variable, in_legacy=True)))
             temp_legacy_url = get_stable_url(temp_legacy_url, in_legacy=True)
-            temp_migrated_url = endpoints.migrated.replace(path_pattern, get_keyword_code(path_variable))
+            temp_migrated_url = endpoints['migrated'].replace(path_pattern, str(get_keyword_code(path_variable, in_legacy=False)))
             temp_migrated_url = get_stable_url(temp_migrated_url, in_legacy=False)
 
             run_test(temp_legacy_url, temp_migrated_url, path_pattern, path_variable, headers, stable_legacy_params, stable_migrated_params, stable_legacy_body, stable_migrated_body, path_discrepencies)
@@ -310,7 +316,7 @@ def generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
     for options in body.values():
         total_body_options += len(options)
     if len(body_discrepencies) > 0:
-        output += body_discrepencies
+        output += body_discrepencies.tablify()
     elif len(body.items()) == total_body_options:
         output += "No testing done for **body**...\n\n"
     else:
