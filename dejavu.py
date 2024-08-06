@@ -179,6 +179,7 @@ def establish_baseline():
         headers=headers,
         params=legacy_stable_query,
         json=legacy_stable_body,
+        verify=False
     )
 
     migrated_url = endpoints['migrated']
@@ -193,7 +194,8 @@ def establish_baseline():
         migrated_url,
         headers=headers,
         params=migrated_stable_query,
-        json=migrated_stable_body   
+        json=migrated_stable_body,
+        verify=False
     )
 
     if legacy_response.status_code != 200 or migrated_response.status_code != 200:
@@ -218,14 +220,16 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         legacy_url,
         headers=headers,
         params=legacy_params,
-        json=legacy_body
+        json=legacy_body,
+        verify=False
     )
 
     migrated_response = call_api(
         migrated_url,
         headers=headers,
         params=migrated_params,
-        json=migrated_body
+        json=migrated_body,
+        verify=False
     )
 
     if legacy_response.status_code != migrated_response.status_code:
