@@ -66,10 +66,18 @@ def get_keyword_code(keyword, in_legacy):
     else:
         return keyword
 
-def get_stable_elements(dict, in_legacy):
-    return {
-        key: get_keyword_code(values[0], in_legacy) for key, values in dict.items()
-    }
+def get_stable_elements(data, in_legacy):
+    result = {}
+
+    for key, value in data.items():
+        if type(data) == dict:
+            result[key] = get_stable_elements(value, in_legacy)
+        elif type(data) == list:
+            result[key] = get_keyword_code(value[0], in_legacy)
+        else:
+            result[key] = get_keyword_code(value, in_legacy)
+
+    return result
 
 def remove_omit_keys(dict):
     omit_keys = [attr for attr, value in dict.items() if value == "$omit"]
@@ -279,6 +287,33 @@ def run_tests():
 
             run_test(stable_legacy_url, stable_migrated_url, attr, value, headers, unstable_legacy_params, unstable_migrated_params, stable_legacy_body, stable_migrated_body, param_discrepencies)
 
+    def test_body_params(legacy_root, migrated_root, legacy_sub, migrated_sub, discrepencies, attr=""):
+        for key, value in legacy_sub.items():
+            if type(value) == list:
+                for option in value[1:]:
+                    legacy_option = get_keyword_code(option, in_legacy=True)
+                    migrated_option = get_keyword_code(option, in_legacy=False)
+                    if legacy_option == "$omit": del legacy_sub[key]
+                    if migrated_option == "$omit": del migrated_sub[key]
+                    run_test(
+                        stable_legacy_url,
+                        stable_migrated_url,
+                        f"{attr}.key" if attr else f"{key}",
+                        option,
+                        headers,
+                        unstable_legacy_params,
+                        unstable_migrated_params,
+                        stable_legacy_body,
+                        stable_migrated_body,
+                        discrepencies
+                    )
+                legacy_option = get_keyword_code(value[0], in_legacy=True)
+                migrated_option = get_keyword_code(value[0], in_legacy=False)
+                if legacy_option == "$omit": del legacy_sub[key]
+                if migrated_option == "$omit": del migrated_sub[key]
+            elif type(value) == dict:
+                test_body_params(legacy_root, migrated_root, legacy_sub[key], migrated_sub[key])
+
     # Test body
     body_discrepencies = Discrepencies()
 
@@ -326,7 +361,7 @@ def generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
     elif len(body.items()) == total_body_options:
         output += "No testing done for **body**...\n\n"
     else:
-        output += "No discrepencies found in the *body testing**...\n\n"
+        output += "No discrepencies found in the **body testing**...\n\n"
 
     return output
 
