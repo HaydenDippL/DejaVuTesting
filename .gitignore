@@ -1,0 +1,6 @@
+.DS_Store
+.vscode
+
+# ignore the config json files
+*.json
+results.md

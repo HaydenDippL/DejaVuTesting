@@ -3,42 +3,47 @@
 DejaVu testing is an CLI for testing API migrations and modernizations. It allows you to interatively compare and contrast two endpoints and test efficiently.
 
 **Usage**
-
-python3 dejavu.py<br/>
--p [params.json](#paramsjson)<br/>
--b [body.json](#bodyjson)<br/>
--h [headers.json](#headersjson)<br/>
--e [endpoints.json](#endpointsjson)<br/>
--c [custom.json](#customjson)<br/>
+```
+python3 dejavu.py config.json
+```
 
 # Walkthrough
 
 ### Setup
 
-Example: you are testing two endpoints that use two body fields `id` and `name`. You want to see what happens in each enpoint, legacy and migrated, if you input `id` with `908303034499` or `"9083033499"` and what happens if you input `name` with `"Hayden"` or `null` or `""`. The way that you would do this is simple. First you would create a `body.json` file in the working directory...
+Example: you are testing two POST endpoints that use two body fields `id` and `name`. You want to see what happens in each enpoint, legacy and migrated, if you input `id` with `908303034499` or `"9083033499"` and what happens if you input `name` with `"Hayden"` or `null` or `""`. The way that you would do this is simple. First you would create the `config.json` file in the working directory...
 
 ```json
 {
-    "id": [9083033499, "9083033499"],
-    "name": ["Hayden" null, ""]
+    "body": {
+        "id": [9083033499, "9083033499"],
+        "name": ["Hayden" null, ""]
+    },
+    "endpoints": {
+        "legacy": "https://your-legacy-endpoint.com",
+        "migrated": "https://your-migrated-endpoint.com",
+        "method": "PUT"
+    }
 }
 ```
 
-The first element in each array represents a **VALID, KNOWN** input for **BOTH** endpoints.
+Let's break it down. The `config.json` file can have up to 6 fields: [`path`](#path), [`query`](#query), [`endpoints`](#endpoints), [`custom`](#custom), [`body`](#body), and [`headers`](#headers). In the example above we use body and endpoints to define our call. You'll notice that body has only array values. This is because we will iterate through these values, testing them all. 
 
-Next you would make a `endpoints.json` file that contains the endpoints...
+**NOTE**: The first element in each array represents a **VALID, KNOWN** input for **BOTH** endpoints. This means that we expect The call to both the legacy and migrated endpoint with the `body`...
 
 ```json
-{
-    "legacy": "https://your-legacy-endpoint.com",
-    "migrated": "https://your-migrated-endpoint.com"
+"body": {
+    "id": 9083033499,
+    "name": "Hayden"
 }
 ```
+
+... to return identical response and 200 status codes. This will be initially tested and if it fails, then the program will not fully execute.
 
 Then you would run the following command
 
 ```
-python3 -b body.json -e endpoints.json
+python3 dejavu.py config.json
 ```
 
 ### Execution
@@ -104,12 +109,12 @@ This table will show the differences between the endpoints. Notice that the CLI 
 
 # Documentation
 
-## body.json
+## body
 
-This **required** json file would contain the different combinations of inputs that you would like to test. The format would look something like this...
+This **optional** json file would contain the different combinations of inputs that you would like to test. The format would look something like this...
 
 ```json
-{
+"body": {
     "id": [9083033499, "9083033499", -1, "", null, "$omit", "Hayden"],
     "name": ["Hayden", 12, "", null, "$omit"]
 }
@@ -117,31 +122,46 @@ This **required** json file would contain the different combinations of inputs t
 
 The first element of any options array must be a known valid input. This is to ensure that the program can have a known valid request that it can compare a potentially invalid request to. 
 
-You may also notice the the strings that start with `'$'`. These are special options which perform some other functionality. The `"$omit"` special option will send the request through without that field. In this case: the body would have just been...
+You may also notice the strings that start with `'$'`. These are special options which perform some other functionality. The `"$omit"` special option will send the request through without that field. In this case: the body would have just been...
 
 ```json
-{
+"body": {
     "name": "Hayden"
 }
 ```
 
-...as the id was ommited.
+...as the `id` was ommited.
 
-## params.json
+## path
+
+The path field is an **optinoal** field. Path paramters must always be prefaced with a `'@'` and be capitalized. If the path parameter key matches a segment of the url, its value array is used. **NOTE** that [custom](#custom) keywords can be defined for path variables also.
 
 ```json
-{
-    "path": "",
-    "query": ""
+"path": {
+    "@ID": [9083033499]
 }
 ```
 
-## headers.json
+If a legacy endpoint was defined as `"https://www.google.com/@ID"` the following json would reformat this as `"https://www.google.com/9083033499"`
 
-This is a static file to specify the headers of your function. The are no combinations and this json is passed directly as your headers. An example of this file includes...
+## query
+
+Query paramters are an **optional** field and work much in the same way as the body.
 
 ```json
-{
+"query": {
+    "name": ["Hayden"]
+}
+```
+
+If a legacy endpoint was defined as `"https://www.google.com"` the following json would reformat this as `"https://www.google.com?name=Hayden"`
+
+## headers
+
+This is a **optional** field to specify the headers of your function. The are no combinations and this json is passed directly as your headers. An example of this file includes...
+
+```json
+"headers": {
     "Content-Type": "application/json",
     "Accept": "application/json"
 }
@@ -149,35 +169,36 @@ This is a static file to specify the headers of your function. The are no combin
 
 This file is not required and if it is not passed, the above file is used as the default.
 
-## endpoints.json
+## endpoints
 
-This is a **required** json file to specify the endpoints that you will be hitting.
+This is a **required** json field to specify the endpoints that you will be hitting.
 
 ```json
-{
+"endpoints": {
     "legacy": "https://www.google.legacy.com",
-    "migrated": "https://www.google.com"
+    "migrated": "https://www.google.com",
+    "method": "POST"
 }
 ```
 
-## custom.json
+## custom
 
-This file is for specifying custom special options in your project. This is for the scenario where the two endpoints accept slightly different data. An example is that yhe two endpoints accept different date formats "MM-DD-YYYY" and "MM/DD/YYYY". This allows you to specify one of these formats for legacy and one for migrated. For example:
+This file is for specifying custom special options in your project and is **optional**. This is for the scenario where the two endpoints accept slightly different data. An example is that the two endpoints accept different date formats "MM-DD-YYYY" and "MM/DD/YYYY". This allows you to specify one of these formats for legacy and one for migrated. For example:
 
 ```json
-{
+"custom": {
     "$date": ["12-21-2002", "12/21/2002"]
 }
 ```
 
-Legacy will always take the first element and migrated will always take the second. Now if you make this call in your <u>body.json</u> file.
+Legacy will always take the first element and migrated will always take the second. Now if you make this call in your `body` field.
 
 ```json
-{
+"body": {
     "date_of_birth": ["$date", "number"]
 }
 ```
 
-legacy will always take `"12-21-2002"` and migrated will always take `"12/21/2002"`, allowing always valid access on the first element on the combination array. 
+Legacy will always take `"12-21-2002"` and migrated will always take `"12/21/2002"`, allowing always valid access on the first element on the combination array. 
 
 You must always define these custom special options with a `"$"`. 
