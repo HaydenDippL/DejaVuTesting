@@ -3,6 +3,7 @@ import sys
 import json
 import requests
 from deepdiff import DeepDiff
+from requests.packages.urllib3.exceptions import InsecureRequestWarning # type: ignore
 
 # TODO: maybe add recursive testing?
 
@@ -41,6 +42,7 @@ config = {}
 
 # Appropiate requests API function eg. requests.get, requests.post, etc...
 call_api = None
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 def read_json(file_path):
     try:
