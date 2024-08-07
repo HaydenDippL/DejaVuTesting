@@ -5,8 +5,6 @@ import requests
 from deepdiff import DeepDiff
 from requests.packages.urllib3.exceptions import InsecureRequestWarning # type: ignore
 
-# TODO: maybe add recursive testing?
-
 class Discrepencies():
     def __init__(self):
         self.discrepencies = []
@@ -66,10 +64,18 @@ def get_keyword_code(keyword, in_legacy):
     else:
         return keyword
 
-def get_stable_elements(dict, in_legacy):
-    return {
-        key: get_keyword_code(values[0], in_legacy) for key, values in dict.items()
-    }
+def get_stable_elements(data, in_legacy):
+    result = {}
+
+    for key, value in data.items():
+        if type(value) == dict:
+            result[key] = get_stable_elements(value, in_legacy)
+        elif type(value) == list:
+            result[key] = get_keyword_code(value[0], in_legacy)
+        else:
+            result[key] = get_keyword_code(value, in_legacy)
+
+    return result
 
 def remove_omit_keys(dict):
     omit_keys = [attr for attr, value in dict.items() if value == "$omit"]
@@ -245,10 +251,7 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         for changed_attr, change in diff.get("values_changed", {}).items():
             discrepencies.add(attr, value, f"Changed: {changed_attr} to {change['old_value']}", f"Changed: {changed_attr} to {change['new_value']}")
 
-def run_tests():
-    # Initialize stable variables
-    stable_legacy_url = get_stable_url(endpoints['legacy'], in_legacy=True)
-    stable_migrated_url = get_stable_url(endpoints['migrated'], in_legacy=False)
+def test_path():
     stable_legacy_params = get_stable_elements(query, in_legacy=True)
     stable_migrated_params = get_stable_elements(query, in_legacy=False)
     stable_legacy_body = get_stable_elements(body, in_legacy=True)
@@ -266,6 +269,16 @@ def run_tests():
 
             run_test(temp_legacy_url, temp_migrated_url, path_pattern, path_variable, headers, stable_legacy_params, stable_migrated_params, stable_legacy_body, stable_migrated_body, path_discrepencies)
 
+    return path_discrepencies
+
+def test_query():
+    stable_legacy_url = get_stable_url(endpoints['legacy'], in_legacy=True)
+    stable_migrated_url = get_stable_url(endpoints['migrated'], in_legacy=False)
+    stable_legacy_params = get_stable_elements(query, in_legacy=True)
+    stable_migrated_params = get_stable_elements(query, in_legacy=False)
+    stable_legacy_body = get_stable_elements(body, in_legacy=True)
+    stable_migrated_body = get_stable_elements(body, in_legacy=False)
+
     # Test param queries
     param_discrepencies = Discrepencies()
     for attr, values in query.items():
@@ -279,21 +292,49 @@ def run_tests():
 
             run_test(stable_legacy_url, stable_migrated_url, attr, value, headers, unstable_legacy_params, unstable_migrated_params, stable_legacy_body, stable_migrated_body, param_discrepencies)
 
-    # Test body
+    return param_discrepencies
+
+def test_body():
+    stable_legacy_url = get_stable_url(endpoints['legacy'], in_legacy=True)
+    stable_migrated_url = get_stable_url(endpoints['migrated'], in_legacy=False)
+    stable_legacy_params = get_stable_elements(query, in_legacy=True)
+    stable_migrated_params = get_stable_elements(query, in_legacy=False)
+    stable_legacy_body = get_stable_elements(body, in_legacy=True)
+    stable_migrated_body = get_stable_elements(body, in_legacy=False)
+
+    body_sub = body.copy()
+
     body_discrepencies = Discrepencies()
 
-    for attr, values in body.items():
-        unstable_legacy_body = stable_legacy_body.copy()
-        unstable_migrated_body = stable_migrated_body.copy()
-        for value in values[1:]:
-            unstable_legacy_body[attr] = get_keyword_code(value, in_legacy=True)
-            unstable_migrated_body[attr] = get_keyword_code(value, in_legacy=False)
-            remove_omit_keys(unstable_legacy_body)
-            remove_omit_keys(unstable_migrated_body)
+    def test_body_recursively(legacy_sub, migrated_sub, body_sub, attr=""):
+        for key, value in body_sub.items():
+            if type(value) == list:
+                for option in value[1:]:
+                    legacy_sub[key] = get_keyword_code(option, in_legacy=True)
+                    migrated_sub[key] = get_keyword_code(option, in_legacy=False)
+                    if legacy_sub[key] == "$omit": del legacy_sub[key]
+                    if migrated_sub[key] == "$omit": del migrated_sub[key]
+                    run_test(
+                        stable_legacy_url,
+                        stable_migrated_url,
+                        f"{attr}.{key}" if attr else f"{key}",
+                        option,
+                        headers,
+                        stable_legacy_params,
+                        stable_migrated_params,
+                        stable_legacy_body,
+                        stable_migrated_body,
+                        body_discrepencies
+                    )
+                legacy_sub[key] = get_keyword_code(value[0], in_legacy=True)
+                migrated_sub[key] = get_keyword_code(value[0], in_legacy=False)
+                if legacy_sub[key] == "$omit": del legacy_sub[key]
+                if migrated_sub[key] == "$omit": del migrated_sub[key]
+            elif type(value) == dict:
+                test_body_recursively(legacy_sub[key], migrated_sub[key], body_sub[key], f"{attr}.{key}" if attr else f"{key}")
 
-            run_test(stable_legacy_url, stable_migrated_url, attr, value, headers, stable_legacy_params, stable_migrated_params, unstable_legacy_body, unstable_migrated_body, body_discrepencies)
-    
-    return (path_discrepencies, param_discrepencies, body_discrepencies)
+    test_body_recursively(stable_legacy_body, stable_migrated_body, body_sub)
+    return body_discrepencies
 
 def generate_tables(path_discrepencies, param_discrepencies, body_discrepencies):
     output = ""
@@ -326,7 +367,7 @@ def generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
     elif len(body.items()) == total_body_options:
         output += "No testing done for **body**...\n\n"
     else:
-        output += "No discrepencies found in the *body testing**...\n\n"
+        output += "No discrepencies found in the **body testing**...\n\n"
 
     return output
 
@@ -342,7 +383,9 @@ if __name__ == "__main__":
 
     establish_baseline()
 
-    path_discrepencies, param_discrepencies, body_discrepencies = run_tests()
+    path_discrepencies = test_path()
+    param_discrepencies = test_query()
+    body_discrepencies = test_body()
 
     output = generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
 
