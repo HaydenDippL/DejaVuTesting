@@ -5,8 +5,6 @@ import requests
 from deepdiff import DeepDiff
 from requests.packages.urllib3.exceptions import InsecureRequestWarning # type: ignore
 
-# TODO: maybe add recursive testing?
-
 class Discrepencies():
     def __init__(self):
         self.discrepencies = []
