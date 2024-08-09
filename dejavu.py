@@ -4,6 +4,9 @@ import json
 import requests
 from deepdiff import DeepDiff
 from requests.packages.urllib3.exceptions import InsecureRequestWarning # type: ignore
+import time
+from colorama import Fore, Back, Style, init
+import math
 
 class Discrepencies():
     def __init__(self):
@@ -223,7 +226,59 @@ def establish_baseline():
             """)
         sys.exit()
 
-def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migrated_params, legacy_body, migrated_body, discrepencies):
+def get_text_time_color(duration):
+    YELLOW_SECONDS = 2
+    RED_SECONDS = 5
+
+    return Fore.GREEN if duration < YELLOW_SECONDS else Fore.YELLOW if duration < RED_SECONDS else Fore.RED
+
+def get_text_code_color(code):
+    code_class = code % 100
+    if code_class == 1:
+        return Fore.WHITE
+    elif code_class == 2:
+        return Fore.GREEN
+    elif code_class == 3:
+        return Fore.YELLOW
+    elif code_class == 4:
+        return Fore.RED
+    else:
+        return Fore.RED
+    
+def get_text_value(value):
+    if value == None:
+        return Fore.YELLOW + "null"
+    if type(value) == int or type(value) == float:
+        return Fore.MAGENTA + f"{value}"
+    if type(value) == str:
+        return Fore.WHITE + f'"{value}"'
+    return Fore.WHITE + f"{value}"
+
+def format_time(duration):
+    SECONDS_IN_MINUTE = 60
+    ONE_SECOND = 1
+    MS_IN_SECOND = 1000
+
+    if duration >= SECONDS_IN_MINUTE:
+        minutes = duration // SECONDS_IN_MINUTE
+        seconds = math.Round(duration % SECONDS_IN_MINUTE)
+        return f"{minutes} min {seconds} s"
+    elif duration >= ONE_SECOND:
+        return f"{duration:.2f} s"
+    else:
+        ms = duration * MS_IN_SECOND % MS_IN_SECOND
+        return f"{ms:.0f} ms"
+
+def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migrated_params, legacy_body, migrated_body, discrepencies, verbose=True):
+    TIME_JUST = 13
+    CODE_JUST = 4
+    CODE_MISMATCH_JUST = 40
+    DISCREPENCIES_JUST = 15
+    TIME_DIFF_JUST = 25
+    print(Style.BRIGHT + f"{attr}: {get_text_value(value)}")
+
+    print(f"\tLegacy:   ", end="")
+    legacy_start = time.time()
     legacy_response = call_api(
         legacy_url,
         headers=headers,
@@ -231,7 +286,16 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         json=legacy_body,
         verify=False
     )
+    legacy_duration = time.time() - legacy_start
+    legacy_time_color = get_text_time_color(legacy_duration)
+    legacy_formatted_time = format_time(legacy_duration)
+    print(legacy_time_color + f"{legacy_formatted_time}".ljust(TIME_JUST), end="")
 
+    legacy_status_color = get_text_code_color(legacy_response.status_code)
+    print(legacy_status_color + f"{legacy_response.status_code}".ljust(CODE_JUST), end="\n")
+
+    print(f"\tMigrated: ", end="")
+    migrated_start = time.time()
     migrated_response = call_api(
         migrated_url,
         headers=headers,
@@ -239,18 +303,46 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         json=migrated_body,
         verify=False
     )
+    migrated_duration = time.time() - migrated_start
+    migrated_time_color = get_text_time_color(migrated_duration)
+    migrated_formatted_time = format_time(migrated_duration)
+    print(migrated_time_color + f"{migrated_formatted_time}".ljust(TIME_JUST), end="")
+
+    migrated_status_color = get_text_code_color(migrated_response.status_code)
+    print(migrated_status_color + f"{migrated_response.status_code}".ljust(CODE_JUST), end="")
 
     if legacy_response.status_code != migrated_response.status_code:
+        print(Fore.RED + Style.BRIGHT + "CODE MISMATCH".rjust(CODE_MISMATCH_JUST), end="")
         discrepencies.add(attr, value, legacy_response.status_code, migrated_response.status_code)
     elif legacy_response.status_code == 200 and migrated_response.status_code == 200:
         legacy_response_json = json.loads(legacy_response.text)
         migrated_response_json = json.loads(migrated_response.text)
         diff = DeepDiff(legacy_response_json, migrated_response_json)
-        for missing_attr in diff.get("dictionary_item_removed", {}):
+
+        removed = diff.get("dictionary_item_removed", {})
+        if len(removed) > 0:
+            print(Fore.RED + f"Removed: {len(removed)}".ljust(DISCREPENCIES_JUST), end="")
+        else:
+            print("".ljust(DISCREPENCIES_JUST), end="")
+        for missing_attr in removed:
             discrepencies.add(attr, value, "", f"Missing: {missing_attr}")
+
         changes = {**diff.get("values_changed", {}), **diff.get("type_changes", {})}
+        if len(changes) > 0:
+            print(Fore.RED + f"Changed: {len(changes)}".ljust(DISCREPENCIES_JUST), end="")
+        else:
+            print("".ljust(DISCREPENCIES_JUST), end="")
         for changed_attr, change in changes.items():
             discrepencies.add(attr, value, f"Changed: {changed_attr} from {change['old_value']}", f"Changed: {changed_attr} to {change['new_value']}")
+
+        THIRTY_SECONDS = 30 * 1000
+        time_ratio = migrated_duration / legacy_duration
+        if (migrated_duration >= 1.25 * legacy_duration or migrated_duration >  THIRTY_SECONDS + legacy_duration):
+            print(Fore.RED + f"Time: +{format_time(migrated_duration - legacy_duration)} (x{time_ratio:.2f})".ljust(TIME_DIFF_JUST))
+            discrepencies.add(attr, value, legacy_formatted_time, f"{migrated_formatted_time} (x{time_ratio:.2f})")
+        else:
+            print("".ljust(TIME_DIFF_JUST), end="")
+    print()
 
 def test_path():
     stable_legacy_params = get_stable_elements(query, in_legacy=True)
@@ -374,9 +466,13 @@ def generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
 
 
 if __name__ == "__main__":
+    start = time.time()
+
     parser = argparse.ArgumentParser(description="Process some JSON files.")
     parser.add_argument('config', type=str, help="Path to the JSON configuration file")
     args = parser.parse_args()
+
+    init(autoreset=True)
     
     config = read_json(args.config)
 
@@ -390,6 +486,10 @@ if __name__ == "__main__":
 
     output = generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
 
-    print(output)
+    end = time.time()
+
+    print(Style.BRIGHT + f"\nTotal Execution Time: {format_time(end - start)}")
+    print(Style.BRIGHT + f"Total Discrepencies: {len(path_discrepencies) + len(param_discrepencies) + len(body_discrepencies)}")
+
     with open("results.md", 'w') as file:
         file.write(output)
