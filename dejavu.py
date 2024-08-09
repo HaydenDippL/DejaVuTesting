@@ -246,10 +246,11 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         legacy_response_json = json.loads(legacy_response.text)
         migrated_response_json = json.loads(migrated_response.text)
         diff = DeepDiff(legacy_response_json, migrated_response_json)
-        for changed_attr in diff.get("dictionary_item_removed", {}):
-            discrepencies.add(attr, value, "", f"Missing: {attr}")
-        for changed_attr, change in diff.get("values_changed", {}).items():
-            discrepencies.add(attr, value, f"Changed: {changed_attr} to {change['old_value']}", f"Changed: {changed_attr} to {change['new_value']}")
+        for missing_attr in diff.get("dictionary_item_removed", {}):
+            discrepencies.add(attr, value, "", f"Missing: {missing_attr}")
+        changes = {**diff.get("values_changed", {}), **diff.get("type_changes", {})}
+        for changed_attr, change in changes.items():
+            discrepencies.add(attr, value, f"Changed: {changed_attr} from {change['old_value']}", f"Changed: {changed_attr} to {change['new_value']}")
 
 def test_path():
     stable_legacy_params = get_stable_elements(query, in_legacy=True)
