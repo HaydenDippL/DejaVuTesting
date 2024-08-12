@@ -7,25 +7,40 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning # type: 
 import time
 from colorama import Fore, Back, Style, init
 import math
+import os
+from datetime import datetime
+import pytz
 
 class Discrepencies():
     def __init__(self):
         self.discrepencies = []
+        self.failed = 0
+        self.passed = 0
 
     def __len__(self):
         return len(self.discrepencies)
+    
+    def fail(self):
+        self.failed += 1
+    
+    def success(self):
+        self.passed += 1
 
     def add(self, attr, val, legacy_code, migrated_code):
         self.discrepencies.append([attr, val, legacy_code, migrated_code])
 
-    def tablify(self):
-        table = "|Attributes|Input|Legacy|Migrated|\n"
-        table += "|:-:|:-:|:-:|:-:|\n"
-        for attr, val, legacy_code, migrated_code in self.discrepencies:
-            val = '"' + val + '"' if type(val) == str else val
-            table += f"|`{attr}`|`{val}`|{legacy_code}|{migrated_code}|\n"
-        table += "\n"
-        return table
+    def tablify(self, name):
+        if self.__len__() > 0:
+            table = "|Attributes|Input|Legacy|Migrated|\n"
+            table += "|:-:|:-:|:-:|:-:|\n"
+            for attr, val, legacy_code, migrated_code in self.discrepencies:
+                val = '"' + val + '"' if type(val) == str else val
+                table += f"|`{attr}`|`{val}`|{legacy_code}|{migrated_code}|\n"
+            return table
+        elif self.passed == 0 and self.failed == 0:
+            return f"No testing done for **{name}**..."
+        else:
+            return f"No discrepencies found in the **{name} testing**..."
 
 SPECIAL_CODES = ["$omit"]
 
@@ -233,7 +248,7 @@ def get_text_time_color(duration):
     return Fore.GREEN if duration < YELLOW_SECONDS else Fore.YELLOW if duration < RED_SECONDS else Fore.RED
 
 def get_text_code_color(code):
-    code_class = code % 100
+    code_class = code // 100
     if code_class == 1:
         return Fore.WHITE
     elif code_class == 2:
@@ -261,7 +276,7 @@ def format_time(duration):
 
     if duration >= SECONDS_IN_MINUTE:
         minutes = duration // SECONDS_IN_MINUTE
-        seconds = math.Round(duration % SECONDS_IN_MINUTE)
+        seconds = round(duration % SECONDS_IN_MINUTE)
         return f"{minutes} min {seconds} s"
     elif duration >= ONE_SECOND:
         return f"{duration:.2f} s"
@@ -315,6 +330,7 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         print(Fore.RED + Style.BRIGHT + "CODE MISMATCH".rjust(CODE_MISMATCH_JUST), end="")
         discrepencies.add(attr, value, legacy_response.status_code, migrated_response.status_code)
     elif legacy_response.status_code == 200 and migrated_response.status_code == 200:
+        passed = True
         legacy_response_json = json.loads(legacy_response.text)
         migrated_response_json = json.loads(migrated_response.text)
         diff = DeepDiff(legacy_response_json, migrated_response_json)
@@ -322,6 +338,7 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         removed = diff.get("dictionary_item_removed", {})
         if len(removed) > 0:
             print(Fore.RED + f"Removed: {len(removed)}".ljust(DISCREPENCIES_JUST), end="")
+            passed = False
         else:
             print("".ljust(DISCREPENCIES_JUST), end="")
         for missing_attr in removed:
@@ -330,6 +347,7 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         changes = {**diff.get("values_changed", {}), **diff.get("type_changes", {})}
         if len(changes) > 0:
             print(Fore.RED + f"Changed: {len(changes)}".ljust(DISCREPENCIES_JUST), end="")
+            passed = False
         else:
             print("".ljust(DISCREPENCIES_JUST), end="")
         for changed_attr, change in changes.items():
@@ -338,10 +356,14 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         THIRTY_SECONDS = 30 * 1000
         time_ratio = migrated_duration / legacy_duration
         if (migrated_duration >= 1.25 * legacy_duration or migrated_duration >  THIRTY_SECONDS + legacy_duration):
-            print(Fore.RED + f"Time: +{format_time(migrated_duration - legacy_duration)} (x{time_ratio:.2f})".ljust(TIME_DIFF_JUST))
+            print(Fore.RED + f"Time: +{format_time(migrated_duration - legacy_duration)} (x{time_ratio:.2f})".ljust(TIME_DIFF_JUST), end="")
             discrepencies.add(attr, value, legacy_formatted_time, f"{migrated_formatted_time} (x{time_ratio:.2f})")
+            passed = False
         else:
             print("".ljust(TIME_DIFF_JUST), end="")
+
+        if passed: discrepencies.success()
+        else: discrepencies.fail()
     print()
 
 def test_path():
@@ -429,42 +451,6 @@ def test_body():
     test_body_recursively(stable_legacy_body, stable_migrated_body, body_sub)
     return body_discrepencies
 
-def generate_tables(path_discrepencies, param_discrepencies, body_discrepencies):
-    output = ""
-
-    total_path_options = 0
-    for options in path.values():
-        total_path_options += len(options)
-    if len(path_discrepencies) > 0:
-        output += path_discrepencies.tablify()
-    elif len(path.items()) == total_path_options:
-        output += "No testing done for **path**...\n\n"
-    else:
-        output += "No discrepencies found in the **path testing**...\n\n"
-
-    total_param_options = 0
-    for options in query.values():
-        total_param_options += len(options)
-    if len(param_discrepencies) > 0:
-        output += param_discrepencies.tablify()
-    elif len(query) == total_param_options:
-        output += "No testing done for **params**...\n\n"
-    else:
-        output += "No discrepencies found in the **params testing**...\n\n"
-
-    total_body_options = 0
-    for options in body.values():
-        total_body_options += len(options)
-    if len(body_discrepencies) > 0:
-        output += body_discrepencies.tablify()
-    elif len(body.items()) == total_body_options:
-        output += "No testing done for **body**...\n\n"
-    else:
-        output += "No discrepencies found in the **body testing**...\n\n"
-
-    return output
-
-
 if __name__ == "__main__":
     start = time.time()
 
@@ -474,6 +460,7 @@ if __name__ == "__main__":
 
     init(autoreset=True)
     
+    args.config = os.path.normpath(args.config)
     config = read_json(args.config)
 
     validate_input(config)
@@ -483,13 +470,55 @@ if __name__ == "__main__":
     path_discrepencies = test_path()
     param_discrepencies = test_query()
     body_discrepencies = test_body()
+    total_discrepencies = len(path_discrepencies) + len(param_discrepencies) + len(body_discrepencies)
 
-    output = generate_tables(path_discrepencies, param_discrepencies, body_discrepencies)
+    replicate_json = json.dumps(config, indent=4)
 
     end = time.time()
 
     print(Style.BRIGHT + f"\nTotal Execution Time: {format_time(end - start)}")
-    print(Style.BRIGHT + f"Total Discrepencies: {len(path_discrepencies) + len(param_discrepencies) + len(body_discrepencies)}")
+    print(Style.BRIGHT + f"Total Discrepencies: {total_discrepencies}")
 
-    with open("results.md", 'w') as file:
-        file.write(output)
+    utc_now = datetime.now(pytz.utc)
+    central_tz = pytz.timezone("America/Chicago")
+    central_time = utc_now.replace(tzinfo=pytz.utc).astimezone(central_tz)
+
+    formatted_time = central_time.strftime("%Y-%m-%d_%H;%M;%S")
+    input_file_prefix, _ = os.path.splitext(os.path.basename(args.config))
+    output_file = input_file_prefix + "-" + formatted_time + ".results.md"
+    output_file_path = os.path.join("results", output_file)
+
+    tests_passed = path_discrepencies.passed + param_discrepencies.passed + body_discrepencies.passed
+    tests_failed = path_discrepencies.failed + param_discrepencies.failed + body_discrepencies.failed
+    total_tests = tests_passed + tests_failed
+    with open(output_file_path, 'w') as file:
+        file.write(
+f"""# Results
+This test was run on **{central_time.strftime("%b %d %I:%M %p %Y")}**
+
+**Tests Passed**: <span style="color: green;">{tests_passed} ({(100 * tests_passed / total_tests):.2f}%)</span>
+
+**Tests Failed**: <span style="color: red;">{tests_failed} ({(100 * tests_failed / total_tests):.2f}%)</span>
+
+**Total Execution Time**: {format_time(end - start)}
+
+**Total Discrepencies**: {total_discrepencies}
+            
+## Path
+{path_discrepencies.tablify("path")}
+## Params
+{param_discrepencies.tablify("params")} 
+## Body
+{body_discrepencies.tablify("body")}
+# Replicate Me
+This test was run on **{central_time.strftime("%b %d %I:%M %p %Y")}**
+
+```
+python dejavu.py {args.config}
+```
+
+### `{args.config}`
+```json
+{replicate_json}
+```
+""")
