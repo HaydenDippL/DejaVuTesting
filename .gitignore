@@ -2,5 +2,10 @@
 .vscode
 
 # ignore the config json files
+config/
 *.json
+
+# ignore the result md files
+results/
 results.md
+*.results.md
