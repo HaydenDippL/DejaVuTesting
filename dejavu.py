@@ -109,54 +109,22 @@ def validate_input(config):
     if "custom" in config:
         global custom
         custom = config["custom"]
-
-        # validate custom
-        MIN_KEYWORD_SIZE = 2
-        for keyword, options in custom.items():
-            if len(keyword) < MIN_KEYWORD_SIZE or keyword[0] != '$':
-                print(f"Custom keywords must be prefaced with '$' and cannot be less than {MIN_KEYWORD_SIZE} characters. The '{keyword}' in the custom attribute fails...")
-                sys.exit()
-            if type(options) != list or len(options) != 2:
-                print(f"Custom values must be an array of size two. The value specified with '{keyword}': {options} in custom attribute fails...")
-                sys.exit()
+        validate_custom(custom)
 
     if "path" in config:
         global path
         path = config["path"]
-
-        EXPECTED_PARAM_FIELDS = ["path", "query"]
-        MIN_PATH_ATTR_SIZE = 2
-        for attr, value in path.items():
-            if type(attr) != str or len(attr) < MIN_PATH_ATTR_SIZE or not all(ch.isupper() for ch in attr[1:]):
-                print(f"Path variables must be prefaced with a `@` and be atleast {MIN_PATH_ATTR_SIZE}. {attr} fails...")
-                sys.exit()
-            if type(value) != list or len(value) < 1:
-                print(f"There must be atleast one option in the {attr} array in path...")
-                sys.exit()
-            for option in value:
-                if type(option) == str and option[0] == '$' and option not in custom:
-                    print(f"Custom keywords like {option} in {attr} must be defined in the custom field...")
-                    sys.exit()
+        validate_path(path)
 
     if "query" in config:
         global query
         query = config["query"]
-
-        for attr, options in query.items():
-            for option in options:
-                if type(option) == str and len(option) > 0 and option[0] == '$' and option not in custom and option not in SPECIAL_CODES:
-                    print(f"Custom keywords like {option} in {attr} must be defined in the custom field...")
-                    sys.exit()
-
+        validate_query(query)
+    
     if "body" in config:
         global body
         body = config["body"]
-        # validate body
-        for attr in body:
-            for option in body[attr]:
-                if type(option) == str and len(option) > 0 and option[0] == '$' and option not in custom and option not in SPECIAL_CODES:
-                    print(f"Custom keywords like {option} in {body} must be defined in custom attribute...")
-                    sys.exit()
+        validate_body(body)
 
     if "headers" in config:
         global headers
@@ -165,31 +133,128 @@ def validate_input(config):
     if "endpoints" in config:
         global endpoints
         endpoints = config["endpoints"]
-        # validate format
-        EXPECTED_ENDPOINT_FIELDS = ["legacy", "migrated", "method"]
-        if len(endpoints.keys()) != len(EXPECTED_ENDPOINT_FIELDS) or not all(attr in endpoints.keys() for attr in EXPECTED_ENDPOINT_FIELDS):
-            print(f"Expected {len(EXPECTED_ENDPOINT_FIELDS)} fields in endpoints attribute: {EXPECTED_ENDPOINT_FIELDS}...")
-            sys.exit()
-        if not all(type(value) == str for value in endpoints.values()):
-            print(f"All values in endpoints attribute must be strings...")
-            sys.exit()
-        EXPECTED_ENDPOINT_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
-        method = endpoints["method"].upper()
-        if method not in EXPECTED_ENDPOINT_METHODS:
-            print(f"The endpoint method in {endpoints} must be in {EXPECTED_ENDPOINT_FIELDS}, but {endpoints["method"]} was not...")
-            sys.exit()
-        else:
-            global call_api
-            if method == "GET": call_api = requests.get
-            elif method == "POST": call_api = requests.post
-            elif method == "PUT": call_api = requests.put
-            elif method == "DELETE": call_api = requests.delete
-            elif method == "PATCH": call_api = requests.patch
-            elif method == "OPTIONS": call_api = requests.options
-            elif method == "HEAD": call_api = requests.head
+        validate_endpoints(endpoints)
     else:
         print(f"The endpoints attribute is required...")
         sys.exit()
+
+def validate_custom(custom):
+    # validate custom
+    MIN_KEYWORD_SIZE = 2
+    for keyword, options in custom.items():
+        if len(keyword) < MIN_KEYWORD_SIZE or keyword[0] != '$':
+            print(f"Custom keywords must be prefaced with '$' and cannot be less than {MIN_KEYWORD_SIZE} characters. The '{keyword}' in the custom attribute fails...")
+            sys.exit()
+        if type(options) != list or len(options) != 2:
+            print(f"Custom values must be an array of size two. The value specified with '{keyword}': {options} in custom attribute fails...")
+            sys.exit()
+
+def validate_path(path):
+    MIN_PATH_ATTR_SIZE = 2
+    for attr, value in path.items():
+        if type(attr) != str or len(attr) < MIN_PATH_ATTR_SIZE or not all(ch.isupper() for ch in attr[1:]):
+            print(f"Path variables must be prefaced with a `@` and be atleast {MIN_PATH_ATTR_SIZE}. {attr} fails...")
+            sys.exit()
+        if type(value) != list or len(value) < 1:
+            print(f"There must be atleast one option in the {attr} array in path...")
+            sys.exit()
+        for i, option in enumerate(value):
+            if type(option) == str and len(option) > 0 and option[0] == '$' and not is_custom_or_special_function(option):
+                print(f"Custom keywords like {option} in {attr} must be defined in the custom field...")
+                sys.exit()
+        if type(value) == list:
+            path[attr] = preprocess(value)
+
+def validate_query(query):
+    for attr, options in query.items():
+        for option in options:
+            if type(option) == str and len(option) > 0 and option[0] == '$' and not is_custom_or_special_function(option) and option not in SPECIAL_CODES:
+                print(f"Custom keywords like {option} in {attr} must be defined in the custom field...")
+                sys.exit()
+        if type(options) == list:
+            query[attr] = preprocess(option)
+
+def validate_body(body_sub, prefix=""):
+    for attr, values in body_sub.items():
+        attr_full = f"{prefix}.{attr}" if len(prefix) > 0 else f"{attr}"
+        if type(values) == dict:
+            validate_body(values, attr_full)
+        elif type(values) == list:
+            for option in values:
+                if type(option) == str and len(option) > 0 and option[0] == '$' and not is_custom_or_special_function(option) and option not in SPECIAL_CODES:
+                    print(f"Custom keywords like {attr_full} in {body} must be defined in custom attribute...")
+                    sys.exit()
+            body_sub[attr] = preprocess(values)
+        elif type(values) == str:
+            if type(option) == str and len(option) > 0 and option[0] == '$' and not is_custom_or_special_function(option) and option not in SPECIAL_CODES:
+                print(f"Custom keywords like {attr_full} in {body} must be defined in custom attribute...")
+                sys.exit()
+
+def validate_endpoints(endpoints):
+    EXPECTED_ENDPOINT_FIELDS = ["legacy", "migrated", "method"]
+    if len(endpoints.keys()) != len(EXPECTED_ENDPOINT_FIELDS) or not all(attr in endpoints.keys() for attr in EXPECTED_ENDPOINT_FIELDS):
+        print(f"Expected {len(EXPECTED_ENDPOINT_FIELDS)} fields in endpoints attribute: {EXPECTED_ENDPOINT_FIELDS}...")
+        sys.exit()
+    if not all(type(value) == str for value in endpoints.values()):
+        print(f"All values in endpoints attribute must be strings...")
+        sys.exit()
+    EXPECTED_ENDPOINT_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
+    method = endpoints["method"].upper()
+    if method not in EXPECTED_ENDPOINT_METHODS:
+        print(f"The endpoint method in {endpoints} must be in {EXPECTED_ENDPOINT_FIELDS}, but {endpoints["method"]} was not...")
+        sys.exit()
+    else:
+        global call_api
+        if method == "GET": call_api = requests.get
+        elif method == "POST": call_api = requests.post
+        elif method == "PUT": call_api = requests.put
+        elif method == "DELETE": call_api = requests.delete
+        elif method == "PATCH": call_api = requests.patch
+        elif method == "OPTIONS": call_api = requests.options
+        elif method == "HEAD": call_api = requests.head
+
+def is_custom_or_special_function(keyword):
+    if keyword in custom:
+        return True
+    elif keyword[:6] == "$range":
+        return True
+    else:
+        return False
+
+def preprocess(options):
+    remove = []
+    ranges = []
+    for i, keyword in enumerate(options):
+        if type(keyword) == str and len(keyword) >= len("$range") and keyword[:6] == "$range":
+            keyword = keyword.strip()
+            args = [arg.strip() for arg in keyword[7:-1].split(",")]
+
+            if len(args) < 2:
+                pass
+            if not args[0].isdigit() or not args[1].isdigit():
+                pass
+            start, end = int(args[0]), int(args[1])
+
+            step = 1 if end > start else -1
+            zfill = 0
+            for arg in args[2:]:
+                if len(arg) > len("step=") and arg[:5] == "step=" and arg[5:].strip().isdigit():
+                    step = int(arg[5:].strip())
+                elif len(arg) > len("zfill=") and arg[:6] == "zfill=" and arg[6:].strip().isdigit():
+                    zfill = int(arg[6:].strip())
+
+            my_range = range(start, end, step)
+            if zfill != 0: my_range = [str(num).zfill(zfill) for num in my_range]
+
+            remove.append(i)
+            ranges.append(my_range)
+
+    temp = 0
+    for i, rng in zip(remove, ranges):
+        options[i+temp:i+temp+1] = rng
+        temp += len(rng) - 1
+
+    return options
 
 def establish_baseline():
     legacy_url = endpoints['legacy']
@@ -224,7 +289,7 @@ def establish_baseline():
         verify=False
     )
 
-    if legacy_response.status_code != 200 or migrated_response.status_code != 200:
+    if legacy_response.status_code // 100 != 2 or migrated_response.status_code // 100 != 2 or legacy_response.status_code != migrated_response.status_code:
         if legacy_response.status_code != 200:
             print(f"""Legacy responded to the stable call with a {legacy_response.status_code} when a 200 is required...
                   Url: {legacy_url}
@@ -275,7 +340,7 @@ def format_time(duration):
     MS_IN_SECOND = 1000
 
     if duration >= SECONDS_IN_MINUTE:
-        minutes = duration // SECONDS_IN_MINUTE
+        minutes = math.floor(duration // SECONDS_IN_MINUTE)
         seconds = round(duration % SECONDS_IN_MINUTE)
         return f"{minutes} min {seconds} s"
     elif duration >= ONE_SECOND:
@@ -326,9 +391,11 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
     migrated_status_color = get_text_code_color(migrated_response.status_code)
     print(migrated_status_color + f"{migrated_response.status_code}".ljust(CODE_JUST), end="")
 
+    passed = True
     if legacy_response.status_code != migrated_response.status_code:
         print(Fore.RED + Style.BRIGHT + "CODE MISMATCH".rjust(CODE_MISMATCH_JUST), end="")
         discrepencies.add(attr, value, legacy_response.status_code, migrated_response.status_code)
+        passed = False
     elif legacy_response.status_code == 200 and migrated_response.status_code == 200:
         passed = True
         legacy_response_json = json.loads(legacy_response.text)
@@ -352,7 +419,7 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
             print("".ljust(DISCREPENCIES_JUST), end="")
         for changed_attr, change in changes.items():
             discrepencies.add(attr, value, f"Changed: {changed_attr} from {change['old_value']}", f"Changed: {changed_attr} to {change['new_value']}")
-
+        
         THIRTY_SECONDS = 30 * 1000
         time_ratio = migrated_duration / legacy_duration
         if (migrated_duration >= 1.25 * legacy_duration or migrated_duration >  THIRTY_SECONDS + legacy_duration):
@@ -362,8 +429,8 @@ def run_test(legacy_url, migrated_url, attr, value, headers, legacy_params, migr
         else:
             print("".ljust(TIME_DIFF_JUST), end="")
 
-        if passed: discrepencies.success()
-        else: discrepencies.fail()
+    if passed: discrepencies.success()
+    else: discrepencies.fail()
     print()
 
 def test_path():
@@ -463,6 +530,8 @@ if __name__ == "__main__":
     args.config = os.path.normpath(args.config)
     config = read_json(args.config)
 
+    replicate_json = json.dumps(config, indent=4)
+
     validate_input(config)
 
     establish_baseline()
@@ -470,14 +539,20 @@ if __name__ == "__main__":
     path_discrepencies = test_path()
     param_discrepencies = test_query()
     body_discrepencies = test_body()
-    total_discrepencies = len(path_discrepencies) + len(param_discrepencies) + len(body_discrepencies)
 
-    replicate_json = json.dumps(config, indent=4)
+    total_discrepencies = len(path_discrepencies) + len(param_discrepencies) + len(body_discrepencies)
+    tests_passed = path_discrepencies.passed + param_discrepencies.passed + body_discrepencies.passed
+    tests_failed = path_discrepencies.failed + param_discrepencies.failed + body_discrepencies.failed
+    total_tests = tests_passed + tests_failed
+    total_tests_len = len(str(total_tests))
 
     end = time.time()
 
     print(Style.BRIGHT + f"\nTotal Execution Time: {format_time(end - start)}")
     print(Style.BRIGHT + f"Total Discrepencies: {total_discrepencies}")
+    print(Style.BRIGHT + Fore.GREEN + f"Tests Passed: {f"{tests_passed}".ljust(total_tests_len)}")
+    print(Style.BRIGHT + Fore.RED +   f"Tests Failed: {f"{tests_failed}".ljust(total_tests_len)}")
+    print(Style.BRIGHT +              f"Total Tests:  {total_tests}")
 
     utc_now = datetime.now(pytz.utc)
     central_tz = pytz.timezone("America/Chicago")
@@ -488,13 +563,8 @@ if __name__ == "__main__":
     output_file = input_file_prefix + "-" + formatted_time + ".results.md"
     output_file_path = os.path.join("results", output_file)
 
-    tests_passed = path_discrepencies.passed + param_discrepencies.passed + body_discrepencies.passed
-    tests_failed = path_discrepencies.failed + param_discrepencies.failed + body_discrepencies.failed
-    total_tests = tests_passed + tests_failed
-    with open(output_file_path, 'w') as file:
-        file.write(
-f"""# Results
-This test was run on **{central_time.strftime("%b %d %I:%M %p %Y")}**
+    output = f"""# Results
+This test was run on **{central_time.strftime("%b %d %I:%M %p %Y")}** and results sent to `{output_file}`.
 
 **Tests Passed**: <span style="color: green;">{tests_passed} ({(100 * tests_passed / total_tests):.2f}%)</span>
 
@@ -521,4 +591,10 @@ python dejavu.py {args.config}
 ```json
 {replicate_json}
 ```
-""")
+"""
+
+    with open(output_file_path, 'w') as file:
+        file.write(output)
+
+    with open("results.md", "w") as file:
+        file.write(output)
