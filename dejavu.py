@@ -172,7 +172,7 @@ def validate_query(query):
                 print(f"Custom keywords like {option} in {attr} must be defined in the custom field...")
                 sys.exit()
         if type(options) == list:
-            query[attr] = preprocess(option)
+            query[attr] = preprocess(options)
 
 def validate_body(body_sub, prefix=""):
     for attr, values in body_sub.items():
