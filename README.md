@@ -53,7 +53,7 @@ The first thing that the CLI will do is run a baseline test with the <u>stable e
 
 The first element of the `body.id` array is `9083033499` and `body.name` array is `"Hayden"`. We will use these values in our call. Because `body.nickname` is a primitive value - `int`, `double`, `null`, or `string` (not nested objects and arrays) - `"Sleepy"` is used.
 
-To pass the baseline test, the legacy and migrated urls must both return identical `200` responses to this request. If this test fails, then the program terminates prematurely. 
+To pass the baseline test, the legacy and migrated urls must both return the same response code in the 200s to this request. If this test fails, then the program terminates prematurely. 
 
 ## Testing
 
@@ -147,7 +147,7 @@ You can define **disjoint** custom variables that send different value to legacy
 
 ---
 
-Using the `"$omit"` string in `body` and `query` will exclude that key-value pair in a test. For example...
+Using the `"$omit"` string in `body` and `query` will exclude that key-value pair in a test. For example... 
 
 ```json
 "body": {
@@ -156,6 +156,8 @@ Using the `"$omit"` string in `body` and `query` will exclude that key-value pai
 ```
 
 ... will test two bodies: `{"name": "Hayden"}` and `{}`. You cannot use `"$omit"` in the `path` tests.
+
+`"$omit"` and other special codes can be found [here](#special-codes)
 
 ---
 
@@ -296,3 +298,35 @@ Legacy will always take the first element and migrated will always take the seco
 Legacy will always take `"12-21-2002"` and migrated will always take `"12/21/2002"`, allowing always valid access on the first element on the combination array. 
 
 You must always define these custom special options with a `"$"`. 
+
+## Special Codes
+
+Special codes are always a string that start with `"$"`. They can allow for complex functionality, random variables, and ranges of variables.
+
+### `"$omit"`
+
+Using the `"$omit"` string in `body` and `query` will exclude that key-value pair in a test. For example... 
+
+```json
+"body": {
+    "name": ["Hayden", "$omit"]
+}
+```
+
+... will test two bodies: `{"name": "Hayden"}` and `{}`. You cannot use `"$omit"` in the `path` tests.
+
+### `"$range()"`
+
+Range allows for iteration over a range of number". Range expects two int arguments and optionally a `step` and a `zfill` argument.
+
+```python
+"$range(0, 10)" # 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+```
+
+```python
+"$range(0, 10, step=2)" # 0, 2, 4, 6, 8
+```
+
+```python
+"$range(0, 22, step=5, zfill=3)" # "000", "005", "010", "015", "020"
+```
